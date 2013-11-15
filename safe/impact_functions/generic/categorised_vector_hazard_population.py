@@ -94,7 +94,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         # Identify hazard and exposure layers
         my_hazard = get_hazard_layer(layers)    # Categorised Hazard
         my_exposure = get_exposure_layer(layers)  # Population Vector
-
+        my_exposure_keywords = my_exposure.get_keywords()
         question = get_question(my_hazard.get_name(),
                                 my_exposure.get_name(),
                                 self)
@@ -103,13 +103,14 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact = self.assign_hazard_level(my_impact, my_hazard)
         print my_impact.get_data()
         my_impact = self.multiply_density_by_area(my_impact)
-        my_impact.keywords = {'impact_summary': 'impact summary',
+        my_impact_keywords = {'impact_summary': 'impact summary',
                      'impact_table': 'impact table',
                      'map_title': 'map title',
                      'target_field': self.parameters['impact field'],
                      'statistics_type': 'class_count',
                      'statistics_classes': self.parameters['categories']}
-        print my_impact.keywords
+        my_impact_keywords.update(my_exposure_keywords)
+        my_impact.keywords = my_impact_keywords
         return my_impact
 
 
