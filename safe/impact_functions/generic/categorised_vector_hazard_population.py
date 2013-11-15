@@ -101,8 +101,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_exposure = self.add_density(my_exposure)
         my_impact = self.deintersect_exposure(my_exposure, my_hazard)
         my_impact = self.assign_hazard_level(my_impact, my_hazard)
-        print my_impact.get_data()
         my_impact = self.multiply_density_by_area(my_impact)
+        my_impact_stats = self.generate_statistics(my_impact)
         my_impact_keywords = {'impact_summary': 'impact summary',
                      'impact_table': 'impact table',
                      'map_title': 'map title',
@@ -111,7 +111,34 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                      'statistics_classes': self.parameters['categories']}
         my_impact_keywords.update(my_exposure_keywords)
         my_impact.keywords = my_impact_keywords
+        print my_impact_stats
+
         return my_impact
+
+        # Generate impact report for the pdf map
+        table_body = [question,
+                      TableRow([tr('People impacted '),
+                                '%s' % format_int(my_impact)],
+                               header=True),
+                      TableRow([tr("People in high hazard area "),
+                                '%s' % format_int(high)],
+                               header=True),
+                      TableRow([tr('People in medium hazard area '),
+                                '%s' % format_int(medium)],
+                               header=True),
+                      TableRow([tr('People in low hazard area'),
+                                '%s' % format_int(low)],
+                               header=True)]
+
+        impact_table = Table(table_body).toNewlineFreeString()
+
+        # Extend impact report for on-screen display
+        table_body.extend([TableRow(tr('Notes'), header=True),
+                           tr('Map shows population density in high or medium '
+                              'hazard area'),
+                           tr('Total population: %s') % format_int(total)])
+        impact_summary = Table(table_body).toNewlineFreeString()
+        map_title = tr('People in high hazard areas')
 
 
     def add_density(self, exposure_layer):
@@ -136,14 +163,14 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
     def deintersect_exposure(self, exposure_layer, hazard_layer):
         # FIXME DB: Need to use the _prepare_polygon layer
-        impact_layer = exposure_layer
+        impact_layer = exposure_layer.copy()
         return impact_layer
 
 
     def assign_hazard_level(self, impact_layer, hazard_layer):
         impact_centroids_geom = convert_polygons_to_centroids(
             impact_layer).get_geometry()
-        impact_field = self.parameters['hazard field']
+        impact_field = self.parameters['impact field']
         impact_attr = impact_layer.get_data()
         hazard_field = self.parameters['hazard field']
         hazard_attr = hazard_layer.get_data()
@@ -160,7 +187,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                             tr('%s field already defined in impact layer') %
                             impact_field)
                     except KeyError:
-                        impact_attr[impact_index][hazard_field] = hazard_level
+                        impact_attr[impact_index][impact_field] = hazard_level
 
         impact_layer.data = impact_attr
         return impact_layer
@@ -174,3 +201,24 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                                                impact_attr['area'])
 
         return impact_layer
+
+    def generate_statistics(self, impact_layer):
+        stats = {}
+        initial_stats = {}
+        for category in self.parameters['categories']:
+            initial_stats[category] = 0
+        impact_attr = impact_layer.get_data()
+        impact_level_field = self.parameters['impact field']
+        impact_count_field = self.parameters['impact population count field']
+        for attr in impact_attr:
+            print attr
+            print impact_level_field
+            current_id = attr['id']
+            impact_level = attr[impact_level_field]
+            try:
+                stats[current_id][impact_level] += attr[impact_count_field]
+            except KeyError:
+                stats[current_id] = initial_stats.copy()
+                stats[current_id][impact_level] = attr[impact_count_field]
+
+        return stats
