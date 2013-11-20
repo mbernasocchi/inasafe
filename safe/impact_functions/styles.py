@@ -88,7 +88,7 @@ def generate_categorical_color_ramp(class_count, saturation=0.5, value=0.7):
     hue_step = 1/float(class_count)
 
     for c in range(class_count):
-            hue = c * hue_step
+            hue = 1 - c * hue_step
             print hue
             r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
             rgb = (r * 255, g * 255, b * 255)
