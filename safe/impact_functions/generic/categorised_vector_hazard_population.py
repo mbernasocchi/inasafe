@@ -184,7 +184,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         impact_count_field = self.parameters['impact population count field']
         for attr in impact_attr:
             # FIXME (DB): Change id to user configurable
-            current_id = attr['Barangay']
+            current_id = attr['id']
             impact_level = attr[impact_level_field]
             try:
                 stats[current_id][impact_level] += attr[impact_count_field]
@@ -195,7 +195,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         return stats
 
     def generate_report(self, question, stats):
-        th = m.Row(m.Cell(m.ImportantText('Barangay')))
+        th = m.Row(m.Cell(m.ImportantText('id')))
         for category in self.parameters['categories']:
             th.add(m.Cell(m.ImportantText(
                 '%s %s' % (tr('Category'), category))))
