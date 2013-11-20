@@ -50,11 +50,12 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     # Configurable parameters
     defaults = get_defaults()
     parameters = OrderedDict([
-        ('population field', '2010_Pop'),
+        ('population field', 'pop'),
         ('hazard field', 'haz_level'),
         ('impact field', 'haz_level'),
         ('impact population count field', 'pop_impact'),
-        ('categories', [0, 1, 2, 3]),  # TODO (DB) allow strings as cat
+        ('categories', [defaults['NO_DATA'], 1, 2, 3]),  # TODO (DB) allow
+        # strings as cat
         ('postprocessors', OrderedDict([
             ('Gender', {'on': False}),
             ('Age', {
@@ -144,9 +145,10 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         hazard_field = self.parameters['hazard field']
         hazard_attr = hazard_layer.get_data()
         hazard_geom = hazard_layer.get_geometry()
+        no_data = get_defaults('NO_DATA')
 
         for impact in impact_attr:
-            impact[impact_field] = 0
+            impact[impact_field] = no_data
 
         for hazard_index, hazard_poly in enumerate(hazard_geom):
             hazard_level = hazard_attr[hazard_index][hazard_field]
@@ -154,7 +156,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                     impact_centroids_geom):
                 if is_inside_polygon(impact_centroid, hazard_poly):
                     if (hasattr(impact_attr[impact_index], impact_field) and
-                        impact_attr[impact_index][impact_field] != 0):
+                        impact_attr[impact_index][impact_field] != no_data):
                         raise RuntimeError(
                             tr('%s field already defined in impact layer') %
                             impact_field)
