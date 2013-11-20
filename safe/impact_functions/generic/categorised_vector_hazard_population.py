@@ -5,8 +5,7 @@ from safe.impact_functions.core import (FunctionProvider,
                                         get_exposure_layer,
                                         get_question,
                                         get_function_title)
-from safe.impact_functions.styles import flood_population_style as style_info
-from safe.storage.vector import Vector
+from safe.impact_functions.styles import generate_categorical_color_ramp
 from safe.storage.vector import convert_polygons_to_centroids
 from safe.common.polygon import is_inside_polygon
 from safe.common.utilities import (ugettext as tr,
@@ -217,10 +216,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     def generate_style(self):
         # Create style
         style_classes = []
-        colors = []
-        for c in range(len(self.parameters['impact field'])):
-            color = c * 111111
-            colors.append('#%s' % color)
+        colors = generate_categorical_color_ramp(
+            len(self.parameters['categories']))
+
         for index, category in enumerate(self.parameters['categories']):
             style_class = dict(
                 label='%s %s' % (tr('Category'), category),
