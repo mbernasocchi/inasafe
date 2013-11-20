@@ -80,3 +80,12 @@ style_classes = [dict(colour='#EEFFEE', quantity=0.01, transparency=100,
                       label=tr('High'))]
 earthquake_fatality_style = dict(target_field=None,
                                  style_classes=style_classes)
+
+
+def generate_categorical_color_ramp(class_count):
+    colors = []
+    for c in range(class_count):
+            color = c * 111111
+            colors.append('#%s' % color)
+    return colors
+
