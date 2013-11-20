@@ -230,6 +230,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                 label='%s %s' % (tr('Category'), category),
                 value=category,
                 colour=colors[index],
+                border_color='#505050',
                 transparency=0,
                 size=1)
             style_classes.append(style_class)
