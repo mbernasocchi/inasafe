@@ -203,6 +203,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     def generate_report(self, question, stats):
         th = m.Row(m.Cell(m.ImportantText('id')))
         for category in self.parameters['categories']:
+            if category == self.NO_DATA:
+                category = get_defaults('NO_DATA')
             th.add(m.Cell(m.ImportantText(
                 '%s %s' % (tr('Category'), category))))
         table = m.Table(th)
