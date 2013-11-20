@@ -1,4 +1,3 @@
-import numpy
 from safe.defaults import get_defaults
 from safe import messaging as m
 from safe.impact_functions.core import (FunctionProvider,
@@ -9,12 +8,10 @@ from safe.impact_functions.core import (FunctionProvider,
 from safe.impact_functions.styles import flood_population_style as style_info
 from safe.storage.vector import Vector
 from safe.storage.vector import convert_polygons_to_centroids
-from safe.storage.utilities import calculate_polygon_centroid
 from safe.common.polygon import is_inside_polygon
 from safe.common.utilities import (ugettext as tr,
                                    format_int,
                                    round_thousand)
-from safe.common.tables import Table, TableRow
 from third_party.odict import OrderedDict
 
 class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
@@ -50,7 +47,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
            'that it will show the result and the total amount of people that '
            'will be impacted for the hazard given.')
     limitation = tr('The number of categories is three.')
-    target_field = 'Impact'
 
     # Configurable parameters
     defaults = get_defaults()
@@ -59,7 +55,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         ('hazard field', 'haz_level'),
         ('impact field', 'haz_level'),
         ('impact population count field', 'pop_impact'),
-        ('categories', [1, 2, 3]),
+        ('categories', [1, 2, 3]),  # TODO (DB) allow strings as cat
         ('postprocessors', OrderedDict([
             ('Gender', {'on': False}),
             ('Age', {
@@ -68,7 +64,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                     ('youth_ratio', defaults['YOUTH_RATIO']),
                     ('adult_ratio', defaults['ADULT_RATIO']),
                     ('elder_ratio', defaults['ELDER_RATIO'])])})]))])
-
 
     def run(self, layers):
         """Plugin for impact of population as derived by categorised hazard
@@ -85,21 +80,25 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
           Table with number of people in each category
         """
 
-
         # Identify hazard and exposure layers
         my_hazard = get_hazard_layer(layers)    # Categorised Hazard
         my_exposure = get_exposure_layer(layers)  # Population Vector
-        my_exposure_keywords = my_exposure.get_keywords()
-        question = get_question(my_hazard.get_name(),
+        my_question = get_question(my_hazard.get_name(),
                                 my_exposure.get_name(),
                                 self)
+
+        my_exposure_keywords = my_exposure.get_keywords()
         my_exposure = self.add_density(my_exposure)
+
         my_impact = self.deintersect_exposure(my_exposure, my_hazard)
         my_impact = self.assign_hazard_level(my_impact, my_hazard)
         my_impact = self.multiply_density_by_area(my_impact)
         my_impact_stats = self.generate_statistics(my_impact)
         my_impact_table, my_impact_summary, my_map_title = (
-            self.generate_report(question, my_impact_stats))
+            self.generate_report(my_question, my_impact_stats))
+
+        my_impact.style_info = self.generate_style()
+
         my_impact_keywords = {'impact_summary': my_impact_summary,
                      'impact_table': my_impact_table,
                      'map_title': my_map_title,
@@ -108,7 +107,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                      'statistics_classes': self.parameters['categories']}
         my_impact_keywords.update(my_exposure_keywords)
         my_impact.keywords = my_impact_keywords
-        print my_impact_stats
 
         return my_impact
 
@@ -183,8 +181,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         impact_level_field = self.parameters['impact field']
         impact_count_field = self.parameters['impact population count field']
         for attr in impact_attr:
-            current_id = attr['id']
             # FIXME (DB): Change id to user configurable
+            current_id = attr['id']
             impact_level = attr[impact_level_field]
             try:
                 stats[current_id][impact_level] += attr[impact_count_field]
@@ -211,7 +209,25 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         report = report.to_html(suppress_newlines=True)
         impact_summary = report
 
-
-
-
         return report, impact_summary, map_title
+
+    def generate_style(self):
+        # Create style
+        style_classes = []
+        colors = []
+        for c in range(len(self.parameters['impact field'])):
+            color = c * 111111
+            colors.append('#%s' % color)
+        for index, category in enumerate(self.parameters['categories']):
+            style_class = dict(
+                label='%s %s' % (tr('Category'), category),
+                value=category,
+                colour=colors[index],
+                transparency=0,
+                size=1)
+            style_classes.append(style_class)
+
+        style_info = dict(target_field=self.parameters['impact field'],
+                          style_classes=style_classes,
+                          style_type='categorizedSymbol')
+        return style_info
