@@ -59,7 +59,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         ('hazard field', 'haz_level'),
         ('impact field', 'haz_level'),
         ('impact population count field', 'pop_impact'),
-        ('categories', [0.33, 0.66, 1]),
+        ('categories', [1, 2, 3]),
         ('postprocessors', OrderedDict([
             ('Gender', {'on': False}),
             ('Age', {
@@ -85,10 +85,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
           Table with number of people in each category
         """
 
-        # The 3 category
-        high_t = 1
-        medium_t = 0.66
-        low_t = 0.34
 
         # Identify hazard and exposure layers
         my_hazard = get_hazard_layer(layers)    # Categorised Hazard
@@ -201,7 +197,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     def generate_report(self, question, stats):
         th = m.Row(m.Cell(m.ImportantText('id')))
         for category in self.parameters['categories']:
-            th.add(m.Cell(m.ImportantText(str(category))))
+            th.add(m.Cell(m.ImportantText(
+                '%s %s' % (tr('Category'), category))))
         table = m.Table(th)
         for name, categories in stats.iteritems():
             row = m.Row(name)
