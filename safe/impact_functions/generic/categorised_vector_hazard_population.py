@@ -1,5 +1,6 @@
 import numpy
 from third_party.odict import OrderedDict
+from safe import messaging as m
 from safe.defaults import get_defaults
 from safe.impact_functions.core import (FunctionProvider,
                                         get_hazard_layer,
@@ -112,33 +113,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact_keywords.update(my_exposure_keywords)
         my_impact.keywords = my_impact_keywords
         print my_impact_stats
+        report = self.generate_report(my_impact_stats)
 
         return my_impact
-
-        # Generate impact report for the pdf map
-        table_body = [question,
-                      TableRow([tr('People impacted '),
-                                '%s' % format_int(my_impact)],
-                               header=True),
-                      TableRow([tr("People in high hazard area "),
-                                '%s' % format_int(high)],
-                               header=True),
-                      TableRow([tr('People in medium hazard area '),
-                                '%s' % format_int(medium)],
-                               header=True),
-                      TableRow([tr('People in low hazard area'),
-                                '%s' % format_int(low)],
-                               header=True)]
-
-        impact_table = Table(table_body).toNewlineFreeString()
-
-        # Extend impact report for on-screen display
-        table_body.extend([TableRow(tr('Notes'), header=True),
-                           tr('Map shows population density in high or medium '
-                              'hazard area'),
-                           tr('Total population: %s') % format_int(total)])
-        impact_summary = Table(table_body).toNewlineFreeString()
-        map_title = tr('People in high hazard areas')
 
 
     def add_density(self, exposure_layer):
@@ -222,3 +199,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                 stats[current_id][impact_level] = attr[impact_count_field]
 
         return stats
+
+    def generate_report(self, stats):
+        report = m.Message()
+        return report
