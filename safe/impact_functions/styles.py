@@ -18,6 +18,7 @@ E.g.::
 
 """
 
+import colorsys
 from safe.common.utilities import ugettext as tr
 
 # Flood population impact raster style
@@ -82,10 +83,22 @@ earthquake_fatality_style = dict(target_field=None,
                                  style_classes=style_classes)
 
 
-def generate_categorical_color_ramp(class_count):
+def generate_categorical_color_ramp(class_count, saturation=0.5, value=0.7):
     colors = []
+    hue_step = 1/float(class_count)
+
     for c in range(class_count):
-            color = c * 111111
-            colors.append('#%s' % color)
+            hue = c * hue_step
+            print hue
+            r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+            rgb = (r * 255, g * 255, b * 255)
+            hex_color = rgb_to_hex(rgb)
+            print hex_color
+            colors.append(hex_color)
     return colors
+
+
+def rgb_to_hex(rgb):
+    """http://stackoverflow.com/questions/214359/converting-hex-color-to-rgb-and-vice-versa"""
+    return '#%02x%02x%02x' % rgb
 
