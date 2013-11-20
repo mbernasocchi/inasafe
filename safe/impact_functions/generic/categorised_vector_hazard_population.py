@@ -1,7 +1,6 @@
 import numpy
-from third_party.odict import OrderedDict
-from safe import messaging as m
 from safe.defaults import get_defaults
+from safe import messaging as m
 from safe.impact_functions.core import (FunctionProvider,
                                         get_hazard_layer,
                                         get_exposure_layer,
@@ -16,8 +15,7 @@ from safe.common.utilities import (ugettext as tr,
                                    format_int,
                                    round_thousand)
 from safe.common.tables import Table, TableRow
-from safe.engine.interpolation import assign_hazard_values_to_exposure_data
-
+from third_party.odict import OrderedDict
 
 class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     """Plugin for impact of population as derived by categorised hazard
@@ -63,9 +61,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         ('impact population count field', 'pop_impact'),
         ('categories', [0.33, 0.66, 1]),
         ('postprocessors', OrderedDict([
-            ('Gender', {'on': True}),
+            ('Gender', {'on': False}),
             ('Age', {
-                'on': True,
+                'on': False,
                 'params': OrderedDict([
                     ('youth_ratio', defaults['YOUTH_RATIO']),
                     ('adult_ratio', defaults['ADULT_RATIO']),
@@ -104,16 +102,17 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact = self.assign_hazard_level(my_impact, my_hazard)
         my_impact = self.multiply_density_by_area(my_impact)
         my_impact_stats = self.generate_statistics(my_impact)
-        my_impact_keywords = {'impact_summary': 'impact summary',
-                     'impact_table': 'impact table',
-                     'map_title': 'map title',
+        my_impact_table, my_impact_summary, my_map_title = (
+            self.generate_report(question, my_impact_stats))
+        my_impact_keywords = {'impact_summary': my_impact_summary,
+                     'impact_table': my_impact_table,
+                     'map_title': my_map_title,
                      'target_field': self.parameters['impact field'],
                      'statistics_type': 'class_count',
                      'statistics_classes': self.parameters['categories']}
         my_impact_keywords.update(my_exposure_keywords)
         my_impact.keywords = my_impact_keywords
         print my_impact_stats
-        report = self.generate_report(my_impact_stats)
 
         return my_impact
 
@@ -139,7 +138,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
 
     def deintersect_exposure(self, exposure_layer, hazard_layer):
-        # FIXME DB: Need to use the _prepare_polygon layer
+        # FIXME (DB): Need to use the _prepare_polygon layer
         impact_layer = exposure_layer.copy()
         return impact_layer
 
@@ -188,9 +187,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         impact_level_field = self.parameters['impact field']
         impact_count_field = self.parameters['impact population count field']
         for attr in impact_attr:
-            print attr
-            print impact_level_field
             current_id = attr['id']
+            # FIXME (DB): Change id to user configurable
             impact_level = attr[impact_level_field]
             try:
                 stats[current_id][impact_level] += attr[impact_count_field]
@@ -200,6 +198,23 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
         return stats
 
-    def generate_report(self, stats):
-        report = m.Message()
-        return report
+    def generate_report(self, question, stats):
+        th = m.Row(m.Cell(m.ImportantText('id')))
+        for category in self.parameters['categories']:
+            th.add(m.Cell(m.ImportantText(str(category))))
+        table = m.Table(th)
+        for name, categories in stats.iteritems():
+            row = m.Row(name)
+            for value in categories.values():
+                row.add(str(value))
+            table.add(row)
+
+        map_title = tr('Impacted People by Category')
+        report = m.Message(m.Heading(map_title, 5), table)
+        report = report.to_html(suppress_newlines=True)
+        impact_summary = report
+
+
+
+
+        return report, impact_summary, map_title
