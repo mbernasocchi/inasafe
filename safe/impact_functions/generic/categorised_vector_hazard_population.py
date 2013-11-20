@@ -27,6 +27,10 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                     layertype=='vector'
     """
     # Function documentation
+
+    NO_DATA = 0  # TODO (MB) this should come from defaults('NO_DATA') but
+    # needs a bit more work
+
     title = tr('Be vectoring impacted')
     synopsis = tr('To assess the impacts of categorized hazards in vector '
                   'format on population vector layer.')
@@ -54,7 +58,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         ('hazard field', 'haz_level'),
         ('impact field', 'haz_level'),
         ('impact population count field', 'pop_impact'),
-        ('categories', [defaults['NO_DATA'], 1, 2, 3]),  # TODO (DB) allow
+        ('categories', [NO_DATA, 1, 2, 3]),  # TODO (DB) allow
         # strings as cat
         ('postprocessors', OrderedDict([
             ('Gender', {'on': False}),
@@ -145,10 +149,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         hazard_field = self.parameters['hazard field']
         hazard_attr = hazard_layer.get_data()
         hazard_geom = hazard_layer.get_geometry()
-        no_data = get_defaults('NO_DATA')
 
         for impact in impact_attr:
-            impact[impact_field] = no_data
+            impact[impact_field] = NO_DATA
 
         for hazard_index, hazard_poly in enumerate(hazard_geom):
             hazard_level = hazard_attr[hazard_index][hazard_field]
@@ -156,7 +159,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                     impact_centroids_geom):
                 if is_inside_polygon(impact_centroid, hazard_poly):
                     if (hasattr(impact_attr[impact_index], impact_field) and
-                        impact_attr[impact_index][impact_field] != no_data):
+                        impact_attr[impact_index][impact_field] != NO_DATA):
                         raise RuntimeError(
                             tr('%s field already defined in impact layer') %
                             impact_field)
