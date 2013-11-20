@@ -146,17 +146,20 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         hazard_attr = hazard_layer.get_data()
         hazard_geom = hazard_layer.get_geometry()
 
+        for impact in impact_attr:
+            impact[impact_field] = None
+
         for hazard_index, hazard_poly in enumerate(hazard_geom):
             hazard_level = hazard_attr[hazard_index][hazard_field]
             for impact_index, impact_centroid in enumerate(
                     impact_centroids_geom):
                 if is_inside_polygon(impact_centroid, hazard_poly):
-                    try:
-                        impact_attr[impact_index][impact_field]
+                    if (hasattr(impact_attr[impact_index], impact_field) and
+                        impact_attr[impact_index][impact_field] is not None):
                         raise RuntimeError(
                             tr('%s field already defined in impact layer') %
                             impact_field)
-                    except KeyError:
+                    else:
                         impact_attr[impact_index][impact_field] = hazard_level
 
         impact_layer.data = impact_attr
