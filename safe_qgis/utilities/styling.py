@@ -196,12 +196,7 @@ def set_vector_categorized_style(vector_layer, style):
         if 'value' not in myClass:
             raise StyleError('Style info should provide a "value" entry')
 
-        try:
-            myValue = float(myClass['value'])
-        except TypeError:
-            raise StyleError(
-                'Value should be a number. I got %s' % myClass['value'])
-
+        value = myClass['value']
         colour = myClass['colour']
         label = myClass['label']
         colour = QtGui.QColor(colour)
@@ -231,7 +226,7 @@ def set_vector_categorized_style(vector_layer, style):
         # alpha = 1: opaque
         alpha = 1 - myTransparencyPercent / 100.0
         symbol.setAlpha(alpha)
-        category = QgsRendererCategoryV2(myValue, symbol, label)
+        category = QgsRendererCategoryV2(value, symbol, label)
         category_list.append(category)
 
     renderer = QgsCategorizedSymbolRendererV2('', category_list)
