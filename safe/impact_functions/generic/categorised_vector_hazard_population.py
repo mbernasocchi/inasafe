@@ -5,7 +5,7 @@ from safe.impact_functions.core import (FunctionProvider,
                                         get_exposure_layer,
                                         get_question,
                                         get_function_title)
-from safe.impact_functions.styles import generate_categorical_color_ramp, hsv_to_hex
+from safe.impact_functions.styles import categorical_style
 from safe.storage.vector import convert_polygons_to_centroids
 from safe.common.polygon import is_inside_polygon
 from safe.common.utilities import (ugettext as tr,
@@ -101,9 +101,12 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact_table, my_impact_summary, my_map_title = (
             self.generate_report(my_question, my_impact_stats))
 
-        my_impact.style_info = self.generate_style(
+        my_impact.style_info = categorical_style(
             self.parameters['hazard field'],
             self.parameters['categories'],
+            self.NO_DATA,
+            tr('No hazard'),
+            'pop',
             max_impact_value)
 
         my_impact_keywords = {
@@ -226,29 +229,3 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         impact_summary = report
 
         return report, impact_summary, map_title
-
-    @staticmethod
-    def generate_style(target_field, categories, max_impact_value):
-        # Create style
-        style_classes = []
-        colors = generate_categorical_color_ramp(len(categories))
-
-        for index, category in enumerate(categories):
-            hsv = colors['hsv'][index]
-            style_class = dict(
-                label='%s %s' % (tr('Category'), category),
-                value=category,
-                colour=colors['hex'][index],
-                data_defined={'color': 'color_hsv(%s, "pop"/%s*100, %s)' % (
-                    hsv[0] * 360, max_impact_value, hsv[2]*100)},
-                border_color=colors['hex'][index],
-                border_width=0.8,
-                transparency=0,
-                size=1)
-
-            style_classes.append(style_class)
-
-        style_info = dict(target_field=target_field,
-                          style_classes=style_classes,
-                          style_type='categorizedSymbol')
-        return style_info
