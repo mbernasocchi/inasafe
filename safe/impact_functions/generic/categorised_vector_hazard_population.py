@@ -106,7 +106,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
             self.parameters['categories'],
             self.NO_DATA,
             tr('No hazard'),
-            'pop',
+            self.parameters['exposure field'],
             max_impact_value)
 
         my_impact_keywords = {
