@@ -13,6 +13,7 @@ from safe.common.utilities import (ugettext as tr,
                                    round_thousand)
 from third_party.odict import OrderedDict
 
+
 class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     """Plugin for impact of population as derived by categorised hazard
 
@@ -113,7 +114,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
         return my_impact
 
-
     def add_density(self, exposure_layer):
         population_field = self.parameters['exposure field']
 
@@ -133,12 +133,10 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
             raise RuntimeError(tr('No population field found'))
         return exposure_layer
 
-
     def deintersect_exposure(self, exposure_layer, hazard_layer):
         # FIXME (DB): Need to use the _prepare_polygon layer
         impact_layer = exposure_layer.copy()
         return impact_layer
-
 
     def assign_hazard_level(self, impact_layer, hazard_layer):
         impact_centroids_geom = convert_polygons_to_centroids(
