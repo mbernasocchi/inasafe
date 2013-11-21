@@ -230,8 +230,10 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
             style_class = dict(
                 label='%s %s' % (tr('Category'), category),
                 value=category,
-                colour=colors[index],
-                border_color='#505050',
+                colour=colors[index],  #  color_hsv(  "haz_level" *100,
+                # "pop"/10000*100 , 80)
+                border_color=colors[index],
+                border_width=0.8,
                 transparency=0,
                 size=1)
             style_classes.append(style_class)
