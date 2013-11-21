@@ -234,10 +234,13 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         colors = generate_categorical_color_ramp(len(categories))
 
         for index, category in enumerate(categories):
+            hsv = colors['hsv'][index]
             style_class = dict(
                 label='%s %s' % (tr('Category'), category),
                 value=category,
                 colour=colors['hex'][index],
+                data_defined={'color': 'color_hsv(%s, "pop"/%s*100, %s)' % (
+                    hsv[0] * 360, max_impact_value, hsv[2]*100)},
                 border_color=colors['hex'][index],
                 border_width=0.8,
                 transparency=0,
