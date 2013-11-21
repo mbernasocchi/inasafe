@@ -54,10 +54,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     # Configurable parameters
     defaults = get_defaults()
     parameters = OrderedDict([
-        ('population field', 'pop'),
+        ('exposure id field', 'id'),
+        ('exposure field', 'pop'),
         ('hazard field', 'haz_level'),
-        ('impact field', 'haz_level'),
-        ('impact population count field', 'pop_impact'),
         ('categories', [NO_DATA, 1, 2, 3]),  # TODO (DB) allow
         # strings as cat
         ('postprocessors', OrderedDict([
@@ -106,7 +105,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact_keywords = {'impact_summary': my_impact_summary,
                      'impact_table': my_impact_table,
                      'map_title': my_map_title,
-                     'target_field': self.parameters['impact field'],
+                     'target_field': self.parameters['hazard field'],
                      'statistics_type': 'class_count',
                      'statistics_classes': self.parameters['categories']}
         my_impact_keywords.update(my_exposure_keywords)
@@ -116,7 +115,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
 
     def add_density(self, exposure_layer):
-        population_field = self.parameters['population field']
+        population_field = self.parameters['exposure field']
 
         # Get population data from layer
         if population_field in exposure_layer.get_attribute_names():
@@ -144,7 +143,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     def assign_hazard_level(self, impact_layer, hazard_layer):
         impact_centroids_geom = convert_polygons_to_centroids(
             impact_layer).get_geometry()
-        impact_field = self.parameters['impact field']
+        impact_field = self.parameters['hazard field']
         impact_attr = impact_layer.get_data()
         hazard_field = self.parameters['hazard field']
         hazard_attr = hazard_layer.get_data()
@@ -172,7 +171,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
     def multiply_density_by_area(self, impact_layer):
         impact_data = impact_layer.get_data()
-        impact_count_field = self.parameters['impact population count field']
+        impact_count_field = self.parameters['exposure field']
         for index, geom in enumerate(impact_layer.get_geometry()):
             impact_attr = impact_data[index]
             impact_attr[impact_count_field] = (impact_attr['density'] *
@@ -186,11 +185,11 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         for category in self.parameters['categories']:
             initial_stats[category] = 0
         impact_attr = impact_layer.get_data()
-        impact_level_field = self.parameters['impact field']
-        impact_count_field = self.parameters['impact population count field']
+        impact_level_field = self.parameters['hazard field']
+        impact_count_field = self.parameters['exposure field']
         for attr in impact_attr:
             # FIXME (DB): Change id to user configurable
-            current_id = attr['id']
+            current_id = attr[self.parameters['exposure id field']]
             impact_level = attr[impact_level_field]
             try:
                 stats[current_id][impact_level] += attr[impact_count_field]
@@ -201,12 +200,14 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         return stats
 
     def generate_report(self, question, stats):
-        th = m.Row(m.Cell(m.ImportantText('id')))
+        th = m.Row(m.Cell(m.ImportantText(
+            self.parameters['exposure id field'])))
         for category in self.parameters['categories']:
             if category == self.NO_DATA:
-                category = get_defaults('NO_DATA')
-            th.add(m.Cell(m.ImportantText(
-                '%s %s' % (tr('Category'), category))))
+                text = tr('No Hazard')
+            else:
+                text = '%s %s' % (tr('Category'), category)
+            th.add(m.Cell(m.ImportantText(text)))
         table = m.Table(th)
         for name, categories in stats.iteritems():
             row = m.Row(name)
@@ -237,7 +238,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                 size=1)
             style_classes.append(style_class)
 
-        style_info = dict(target_field=self.parameters['impact field'],
+        style_info = dict(target_field=self.parameters['hazard field'],
                           style_classes=style_classes,
                           style_type='categorizedSymbol')
         return style_info
