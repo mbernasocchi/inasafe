@@ -84,16 +84,26 @@ earthquake_fatality_style = dict(target_field=None,
 
 
 def generate_categorical_color_ramp(class_count, saturation=0.5, value=0.7):
-    colors = []
+    colors = {'hex': [],
+              'rgb': [],
+              'hsv': []}
     hue_step = 1 / float(class_count)
 
     for c in range(class_count):
         hue = 1 - c * hue_step
+        hsv_color = (hue, saturation, value)
         r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
-        rgb = (r * 255, g * 255, b * 255)
-        hex_color = rgb_to_hex(rgb)
-        colors.append(hex_color)
+        rgb_color = (r * 255, g * 255, b * 255)
+        hex_color = rgb_to_hex(rgb_color)
+        colors['hex'].append(hex_color)
+        colors['rgb'].append(rgb_color)
+        colors['hsv'].append(hsv_color)
     return colors
+
+
+def hsv_to_hex(hue, saturation, value):
+    r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+    return rgb_to_hex((r * 255, g * 255, b * 255))
 
 
 def rgb_to_hex(rgb):

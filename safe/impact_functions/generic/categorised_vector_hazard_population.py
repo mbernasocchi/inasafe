@@ -5,7 +5,7 @@ from safe.impact_functions.core import (FunctionProvider,
                                         get_exposure_layer,
                                         get_question,
                                         get_function_title)
-from safe.impact_functions.styles import generate_categorical_color_ramp
+from safe.impact_functions.styles import generate_categorical_color_ramp, hsv_to_hex
 from safe.storage.vector import convert_polygons_to_centroids
 from safe.common.polygon import is_inside_polygon
 from safe.common.utilities import (ugettext as tr,
@@ -96,19 +96,23 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
         my_impact = self.deintersect_exposure(my_exposure, my_hazard)
         my_impact = self.assign_hazard_level(my_impact, my_hazard)
-        my_impact = self.multiply_density_by_area(my_impact)
+        my_impact, max_impact_value = self.multiply_density_by_area(my_impact)
         my_impact_stats = self.generate_statistics(my_impact)
         my_impact_table, my_impact_summary, my_map_title = (
             self.generate_report(my_question, my_impact_stats))
 
-        my_impact.style_info = self.generate_style()
+        my_impact.style_info = self.generate_style(
+            self.parameters['hazard field'],
+            self.parameters['categories'],
+            max_impact_value)
 
-        my_impact_keywords = {'impact_summary': my_impact_summary,
-                     'impact_table': my_impact_table,
-                     'map_title': my_map_title,
-                     'target_field': self.parameters['hazard field'],
-                     'statistics_type': 'class_count',
-                     'statistics_classes': self.parameters['categories']}
+        my_impact_keywords = {
+            'impact_summary': my_impact_summary,
+            'impact_table': my_impact_table,
+            'map_title': my_map_title,
+            'target_field': self.parameters['hazard field'],
+            'statistics_type': 'class_count',
+            'statistics_classes': self.parameters['categories']}
         my_impact_keywords.update(my_exposure_keywords)
         my_impact.keywords = my_impact_keywords
 
@@ -169,13 +173,16 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
     def multiply_density_by_area(self, impact_layer):
         impact_data = impact_layer.get_data()
-        impact_count_field = self.parameters['exposure field']
+        value_field = self.parameters['exposure field']
+        max_impact_value = 0
         for index, geom in enumerate(impact_layer.get_geometry()):
             impact_attr = impact_data[index]
-            impact_attr[impact_count_field] = (impact_attr['density'] *
-                                               impact_attr['area'])
+            new_impact = impact_attr['density'] * impact_attr['area']
+            impact_attr[value_field] = new_impact
+            if new_impact > max_impact_value:
+                max_impact_value = new_impact
 
-        return impact_layer
+        return impact_layer, max_impact_value
 
     def generate_statistics(self, impact_layer):
         stats = {}
@@ -220,25 +227,25 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
 
         return report, impact_summary, map_title
 
-    def generate_style(self):
+    @staticmethod
+    def generate_style(target_field, categories, max_impact_value):
         # Create style
         style_classes = []
-        colors = generate_categorical_color_ramp(
-            len(self.parameters['categories']))
+        colors = generate_categorical_color_ramp(len(categories))
 
-        for index, category in enumerate(self.parameters['categories']):
+        for index, category in enumerate(categories):
             style_class = dict(
                 label='%s %s' % (tr('Category'), category),
                 value=category,
-                colour=colors[index],  #  color_hsv(  "haz_level" *100,
-                # "pop"/10000*100 , 80)
-                border_color=colors[index],
+                colour=colors['hex'][index],
+                border_color=colors['hex'][index],
                 border_width=0.8,
                 transparency=0,
                 size=1)
+
             style_classes.append(style_class)
 
-        style_info = dict(target_field=self.parameters['hazard field'],
+        style_info = dict(target_field=target_field,
                           style_classes=style_classes,
                           style_type='categorizedSymbol')
         return style_info
