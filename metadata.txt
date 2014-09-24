@@ -12,10 +12,10 @@
 name=InaSAFE
 qgisMinimumVersion=2.0
 qgisMaximumVersion=2.99.99
-description=InaSAFE Disaster Scenario Assessment for Emergencies tool developed by BNPB, AusAID, World Bank
-version=2.0.0-3
+description=InaSAFE is free software that allows disaster managers to study realistic natural hazard impact scenarios for better planning, preparedness and response activities.
+version=2.1.0
 # alpha, beta, rc or final
-status=alpha
+status=final
 
 
 # end of mandatory metadata
@@ -23,7 +23,17 @@ status=alpha
 # Optional items:
 
 # Uncomment the following line and add your changelog entries:
-# changelog=
+changelog=
+        2.1.0
+        Feature Release:
+        * New wizard tool for defining keywords
+        * Updated user interface for keywords editor
+        * New optimised implementation for raster flood on roads
+        * Added preview and postview tool for analysis extent
+        * Added data driven age postprocessing support
+        * Revision of realtime implementation
+        * Improvements to coding standards support
+        * Many bugfixes and small enhancements
 
 # tags are comma separated with spaces allowed
 tags=contingency planning, impact assessments, disaster scenarios, natural hazards
@@ -33,11 +43,11 @@ tracker=https://github.com/AIFDR/inasafe/issues
 repository=https://github.com/AIFDR/inasafe
 icon=icon.png
 # experimental flag
-experimental=True
+experimental=False
 
 # deprecated flag (applies to the whole plugin, not just a single version
 deprecated=False
 
 # Author contact information
-author=BNPB, AusAID and the World Bank
-email=ole.moller.nielsen@gmail.com
+author=Indonesian Government - BNPB, Australian Government - AIFDR and World Bank - GFDRR
+email=info@inasafe.org

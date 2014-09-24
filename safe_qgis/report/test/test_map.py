@@ -1,3 +1,4 @@
+# coding=utf-8
 """**Tests for map creation in QGIS plugin.**
 
 """
@@ -8,6 +9,10 @@ __date__ = '01/11/2010'
 __license__ = "GPL"
 __copyright__ = 'Copyright 2012, Australia Indonesia Facility for '
 __copyright__ += 'Disaster Reduction'
+
+# this import required to enable PyQt API v2 - DO NOT REMOVE!
+#noinspection PyUnresolvedReferences
+import qgis  # pylint: disable=W0611
 
 import unittest
 import os
@@ -21,13 +26,16 @@ from qgis.core import (
     QgsMapLayerRegistry,
     QgsRectangle)
 from qgis.gui import QgsMapCanvasLayer
+
+from safe.common.testing import get_qgis_app
+# In our tests, we need to have this line below before importing any other
+# safe_qgis.__init__ to load all the configurations that we make for testing
+QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
+
 from safe_qgis.safe_interface import temp_dir, unique_filename
-from safe_qgis.utilities.utilities_for_testing import (
-    get_qgis_app,
-    load_layer)
+from safe_qgis.utilities.utilities_for_testing import load_layer
 from safe_qgis.report.map import Map
 
-QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
 LOGGER = logging.getLogger('InaSAFE')
 
 
@@ -74,13 +82,14 @@ class MapTest(unittest.TestCase):
         CANVAS.refresh()
         report = Map(IFACE)
         report.set_impact_layer(layer)
-        out_path = unique_filename(prefix='mapDefaultTemplateTest',
-                                   suffix='.pdf',
-                                   dir=temp_dir('test'))
+        out_path = unique_filename(
+            prefix='mapDefaultTemplateTest',
+            suffix='.pdf',
+            dir=temp_dir('test'))
         report.make_pdf(out_path)
         LOGGER.debug(out_path)
         message = 'Rendered output does not exist: %s' % out_path
-        assert os.path.exists(out_path), message
+        self.assertTrue(os.path.exists(out_path), message)
         # pdf rendering is non deterministic so we can't do a hash check
         # test_renderComposition renders just the image instead of pdf
         # so we hash check there and here we just do a basic minimum file
@@ -93,13 +102,22 @@ class MapTest(unittest.TestCase):
         # with a lower maintenance test strategy.
         expected_sizes = [
             405359,  # Ubuntu 13.04_64
+            427172,  # Ubuntu 13.10_64
+            139236,  # Ubuntu 14.04_64 AG
+            152980,  # Ubuntu 14.04_64 TS - pycharm
+            152862,  # Ubuntu 14.04_64 TS - make - TODO why is this?
+            414589,  # Slackware64 14.0
+            144542,  # Linux Mint 14_64
+            148267,  # Windows 7 32
+            150412,  # Windows 7 64
+            143652,  # UB 12.04 Jenkins
         ]
         message = '%s\nExpected rendered map pdf to be in %s, got %s' % (
             out_path, expected_sizes, out_size)
         self.assertIn(out_size, expected_sizes, message)
 
     def test_custom_logo(self):
-        """Test that setting user-defined logo works"""
+        """Test that setting user-defined logo works."""
         LOGGER.info('Testing custom_logo')
         layer, _ = load_layer('test_shakeimpact.shp')
         canvas_layer = QgsMapCanvasLayer(layer)
@@ -109,14 +127,13 @@ class MapTest(unittest.TestCase):
         CANVAS.refresh()
         report = Map(IFACE)
         report.set_impact_layer(layer)
-        report.set_logo(":/plugins/inasafe/logo-flower.png")
-        out_path = unique_filename(prefix='mapCustomLogoTest',
-                                   suffix='.pdf',
-                                   dir=temp_dir('test'))
+        report.set_organisation_logo(":/plugins/inasafe/logo-flower.png")
+        out_path = unique_filename(
+            prefix='mapCustomLogoTest', suffix='.pdf', dir=temp_dir('test'))
         report.make_pdf(out_path)
         LOGGER.debug(out_path)
         message = 'Rendered output does not exist: %s' % out_path
-        assert os.path.exists(out_path), message
+        self.assertTrue(os.path.exists(out_path), message)
         # pdf rendering is non deterministic so we can't do a hash check
         # test_renderComposition renders just the image instead of pdf
         # so we hash check there and here we just do a basic minimum file
@@ -130,6 +147,15 @@ class MapTest(unittest.TestCase):
 
         expected_sizes = [
             402083,  # Ubuntu 13.04_64
+            400563,  # Ubuntu 13.10_64
+            76960,  # Ubuntu 14.04_64 AG
+            90704,  # Ubuntu 14.04_64 TS pycharm
+            90582,  # Ubuntu 14.04_64 TS make - TODO why is this?
+            367934,  # Slackware64 14.0
+            82263,  # Linux Mint 14_64
+            85418,  # Windows 7 32bit
+            88779,  # Windows 7 64bit
+            81373,   # Jenkins ub 12.04
         ]
         message = '%s\nExpected rendered map pdf to be in %s, got %s' % (
             out_path, expected_sizes, out_size)

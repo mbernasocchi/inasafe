@@ -11,7 +11,6 @@ Contact : ole.moller.nielsen@gmail.com
      (at your option) any later version.
 
 """
-
 __author__ = 'tim@linfiniti.com'
 __date__ = '20/01/2011'
 __copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
@@ -23,16 +22,19 @@ from qgis.core import (
     QgsProviderRegistry,
     QgsCoordinateReferenceSystem,
     QgsRasterLayer)
-from safe_qgis.utilities.utilities_for_testing import get_qgis_app
-from safe_qgis.safe_interface import EXPDATA
 
-QGIS_APP = get_qgis_app()
+from safe.common.testing import get_qgis_app
+# In our tests, we need to have this line below before importing any other
+# safe_qgis.__init__ to load all the configurations that we make for testing
+QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
+
+from safe_qgis.safe_interface import EXPDATA
 
 
 class QGISTest(unittest.TestCase):
     """Test the QGIS Environment"""
 
-    def test_QGISEnvironment(self):
+    def test_qgis_environment(self):
         """QGIS environment has the expected providers"""
 
         r = QgsProviderRegistry.instance()
@@ -61,10 +63,10 @@ class QGISTest(unittest.TestCase):
         self.assertEqual(myAuthId, myExpectedAuthId)
 
         # now test for a loaded layer
-        myPath = os.path.join(EXPDATA, 'glp10ag.asc')
+        path = os.path.join(EXPDATA, 'glp10ag.asc')
         myTitle = 'people'
-        myLayer = QgsRasterLayer(myPath, myTitle)
-        myAuthId = myLayer.crs().authid()
+        layer = QgsRasterLayer(path, myTitle)
+        myAuthId = layer.crs().authid()
         self.assertEqual(myAuthId, myExpectedAuthId)
 
 if __name__ == '__main__':

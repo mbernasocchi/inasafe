@@ -1,15 +1,29 @@
+# coding=utf-8
 """Common functionality used by regression tests
 """
+# Import the PyQt and QGIS libraries
+# this import required to enable PyQt API v2
+import qgis  # pylint: disable=W0611
 
 import numpy
 import os
-
-from numerics import axes_to_points
+import sys
+import logging
 from numpy.testing import Tester
+
+from safe.common.numerics import axes_to_points
 from safe.common.version import get_version
 
 
+LOGGER = logging.getLogger('InaSAFE')
+QGIS_APP = None  # Static variable used to hold hand to running QGIS app
+CANVAS = None
+PARENT = None
+IFACE = None
+
+
 class SafeTester(Tester):
+    """Tester class for testing SAFE package."""
     def _show_system_info(self):
         print 'safe version %s' % get_version()
         super(SafeTester, self)._show_system_info()
@@ -46,14 +60,15 @@ UNITDATA = os.path.abspath(
                  'data'))
 
 # Known feature counts in test data
-FEATURE_COUNTS = {'test_buildings.shp': 144,
-                  'tsunami_building_exposure.shp': 19,
-                  'kecamatan_geo.shp': 42,
-                  'Padang_WGS84.shp': 3896,
-                  'OSM_building_polygons_20110905.shp': 34960,
-                  'indonesia_highway_sample.shp': 2,
-                  'OSM_subset.shp': 79,
-                  'kecamatan_jakarta_osm.shp': 47}
+FEATURE_COUNTS = {
+    'test_buildings.shp': 144,
+    'tsunami_building_exposure.shp': 19,
+    'kecamatan_geo.shp': 42,
+    'Padang_WGS84.shp': 3896,
+    'OSM_building_polygons_20110905.shp': 34960,
+    'indonesia_highway_sample.shp': 2,
+    'OSM_subset.shp': 79,
+    'kecamatan_jakarta_osm.shp': 47}
 
 # For testing of storage modules
 GEOTRANSFORMS = [(105.3000035, 0.008333, 0.0, -5.5667785, 0.0, -0.008333),
@@ -63,6 +78,8 @@ GEOTRANSFORMS = [(105.3000035, 0.008333, 0.0, -5.5667785, 0.0, -0.008333),
 
 def combine_coordinates(x, y):
     """Make list of all combinations of points for x and y coordinates
+    :param x:
+    :param y:
     """
 
     return axes_to_points(x, y)
@@ -655,3 +672,67 @@ test_polygon = numpy.array([[122.229086, -8.624406],
                             [122.228947, -8.624550],
                             [122.229167, -8.624583],
                             [122.229086, -8.624406]])
+
+
+# noinspection PyUnresolvedReferences
+def get_qgis_app():
+    """ Start one QGIS application to test against.
+
+    :returns: Handle to QGIS app, canvas, iface and parent. If there are any
+        errors the tuple members will be returned as None.
+    :rtype: (QgsApplication, CANVAS, IFACE, PARENT)
+
+    If QGIS is already running the handle to that app will be returned.
+    """
+
+    try:
+        from PyQt4 import QtGui, QtCore
+        from PyQt4.QtCore import QCoreApplication, QSettings
+        from qgis.core import QgsApplication
+        from qgis.gui import QgsMapCanvas
+        from safe.common.qgis_interface import QgisInterface
+    except ImportError:
+        return None, None, None, None
+
+    global QGIS_APP  # pylint: disable=W0603
+
+    if QGIS_APP is None:
+        gui_flag = True  # All test will run qgis in gui mode
+
+        # For testing purposes, we use our own configuration file instead of
+        # using the QGIS apps conf of the host
+        QCoreApplication.setOrganizationName('QGIS')
+        QCoreApplication.setOrganizationDomain('qgis.org')
+        QCoreApplication.setApplicationName('QGIS2InaSAFETesting')
+
+        #noinspection PyPep8Naming
+        QGIS_APP = QgsApplication(sys.argv, gui_flag)
+
+        # Make sure QGIS_PREFIX_PATH is set in your env if needed!
+        QGIS_APP.initQgis()
+        s = QGIS_APP.showSettings()
+        LOGGER.debug(s)
+
+        # Save some settings
+        settings = QSettings()
+        settings.setValue('locale/overrideFlag', True)
+        settings.setValue('locale/userLocale', 'en_US')
+
+    global PARENT  # pylint: disable=W0603
+    if PARENT is None:
+        #noinspection PyPep8Naming
+        PARENT = QtGui.QWidget()
+
+    global CANVAS  # pylint: disable=W0603
+    if CANVAS is None:
+        #noinspection PyPep8Naming
+        CANVAS = QgsMapCanvas(PARENT)
+        CANVAS.resize(QtCore.QSize(400, 400))
+
+    global IFACE  # pylint: disable=W0603
+    if IFACE is None:
+        # QgisInterface is a stub implementation of the QGIS plugin interface
+        #noinspection PyPep8Naming
+        IFACE = QgisInterface(CANVAS)
+
+    return QGIS_APP, CANVAS, IFACE, PARENT

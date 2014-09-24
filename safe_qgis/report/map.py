@@ -19,16 +19,21 @@ __copyright__ += 'Disaster Reduction'
 
 import logging
 
-from PyQt4 import QtCore, QtGui, QtXml
+# noinspection PyPackageRequirements
+from PyQt4 import QtCore, QtXml
 from qgis.core import (
     QgsComposition,
-    QgsRectangle)
+    QgsRectangle,
+    QgsMapLayer)
 from safe_qgis.safe_interface import temp_dir, unique_filename, get_version
-from safe_qgis.exceptions import KeywordNotFoundError, ReportCreationError
+from safe_qgis.exceptions import (
+    KeywordNotFoundError,
+    ReportCreationError)
 from safe_qgis.utilities.keyword_io import KeywordIO
-from safe_qgis.utilities.utilities import (
-    setup_printer,
-    dpi_to_meters)
+from safe_qgis.utilities.defaults import (
+    disclaimer,
+    default_organisation_logo_path,
+    default_north_arrow_path)
 
 # Don't remove this even if it is flagged as unused by your ide
 # it is needed for qrc:/ url resolution. See Qt Resources docs.
@@ -49,9 +54,12 @@ class Map():
         self.keyword_io = KeywordIO()
         self.printer = None
         self.composition = None
-        self.legend = None
-        self.logo = ':/plugins/inasafe/bnpb_logo.png'
-        self.template = ':/plugins/inasafe/inasafe.qpt'
+        self.extent = iface.mapCanvas().extent()
+        self.safe_logo = ':/plugins/inasafe/inasafe-logo-url.svg'
+        self.north_arrow = default_north_arrow_path()
+        self.org_logo = default_organisation_logo_path()
+        self.template = ':/plugins/inasafe/inasafe-portrait-a4.qpt'
+        self.disclaimer = disclaimer()
         self.page_width = 0  # width in mm
         self.page_height = 0  # height in mm
         self.page_dpi = 300.0
@@ -78,13 +86,29 @@ class Map():
         """
         self.layer = layer
 
-    def set_logo(self, logo):
-        """Set image that will be used as logo in reports.
+    def set_north_arrow_image(self, north_arrow_path):
+        """Set image that will be used as organisation logo in reports.
+
+        :param north_arrow_path: Path to image file
+        :type north_arrow_path: str
+        """
+        self.north_arrow = north_arrow_path
+
+    def set_organisation_logo(self, logo):
+        """Set image that will be used as organisation logo in reports.
 
         :param logo: Path to image file
         :type logo: str
         """
-        self.logo = logo
+        self.org_logo = logo
+
+    def set_disclaimer(self, text):
+        """Set text that will be used as disclaimer in reports.
+
+        :param text: Disclaimer text
+        :type text: str
+        """
+        self.disclaimer = text
 
     def set_template(self, template):
         """Set template that will be used for report generation.
@@ -94,52 +118,24 @@ class Map():
         """
         self.template = template
 
+    def set_extent(self, extent):
+        """Set extent or the report map
+
+        :param extent: Extent of the report map
+        :type extent: QgsRectangle
+
+        """
+        self.extent = extent
+
     def setup_composition(self):
         """Set up the composition ready for drawing elements onto it."""
         LOGGER.debug('InaSAFE Map setupComposition called')
         canvas = self.iface.mapCanvas()
         renderer = canvas.mapRenderer()
         self.composition = QgsComposition(renderer)
-        self.composition.setPlotStyle(QgsComposition.Print)  # or preview
+        self.composition.setPlotStyle(QgsComposition.Preview)  # or preview
         self.composition.setPrintResolution(self.page_dpi)
         self.composition.setPrintAsRaster(True)
-
-    def render(self):
-        """Render the map composition to an image and save that to disk.
-
-        :returns: A three-tuple of:
-            * str: image_path - absolute path to png of rendered map
-            * QImage: image - in memory copy of rendered map
-            * QRectF: target_area - dimensions of rendered map
-        :rtype: tuple
-        """
-        LOGGER.debug('InaSAFE Map renderComposition called')
-        # NOTE: we ignore self.composition.printAsRaster() and always rasterize
-        width = int(self.page_dpi * self.page_width / 25.4)
-        height = int(self.page_dpi * self.page_height / 25.4)
-        image = QtGui.QImage(
-            QtCore.QSize(width, height),
-            QtGui.QImage.Format_ARGB32)
-        image.setDotsPerMeterX(dpi_to_meters(self.page_dpi))
-        image.setDotsPerMeterY(dpi_to_meters(self.page_dpi))
-
-        # Only works in Qt4.8
-        #image.fill(QtGui.qRgb(255, 255, 255))
-        # Works in older Qt4 versions
-        image.fill(55 + 255 * 256 + 255 * 256 * 256)
-        image_painter = QtGui.QPainter(image)
-        source_area = QtCore.QRectF(
-            0, 0, self.page_width,
-            self.page_height)
-        target_area = QtCore.QRectF(0, 0, width, height)
-        self.composition.render(image_painter, target_area, source_area)
-        image_painter.end()
-        image_path = unique_filename(
-            prefix='mapRender_',
-            suffix='.png',
-            dir=temp_dir())
-        image.save(image_path)
-        return image_path, image, target_area
 
     def make_pdf(self, filename):
         """Generate the printout for our final map.
@@ -148,11 +144,17 @@ class Map():
             saved. If None, a generated file name will be used.
         :type filename: str
 
+        :raises: TemplateElementMissingError - when template elements are
+            missing
+
         :returns: File name of the output file (equivalent to filename if
                 provided).
         :rtype: str
         """
         LOGGER.debug('InaSAFE Map printToPdf called')
+        self.setup_composition()
+        self.load_template()
+
         if filename is None:
             map_pdf_path = unique_filename(
                 prefix='report', suffix='.pdf', dir=temp_dir())
@@ -160,14 +162,7 @@ class Map():
             # We need to cast to python string in case we receive a QString
             map_pdf_path = str(filename)
 
-        self.load_template()
-
-        resolution = self.composition.printResolution()
-        self.printer = setup_printer(map_pdf_path, resolution=resolution)
-        _, image, rectangle = self.render()
-        painter = QtGui.QPainter(self.printer)
-        painter.drawImage(rectangle, image, rectangle)
-        painter.end()
+        self.composition.exportAsPDF(map_pdf_path)
         return map_pdf_path
 
     def map_title(self):
@@ -191,13 +186,14 @@ class Map():
         :returns: None on error, otherwise the attributes (notes and units).
         :rtype: None, str
         """
-        LOGGER.debug('InaSAFE Map getMapLegendAtributes called')
+        LOGGER.debug('InaSAFE Map getMapLegendAttributes called')
         legend_attribute_list = [
             'legend_notes',
             'legend_units',
             'legend_title']
         legend_attribute_dict = {}
         for myLegendAttribute in legend_attribute_list:
+            # noinspection PyBroadException
             try:
                 legend_attribute_dict[myLegendAttribute] = \
                     self.keyword_io.read_keywords(
@@ -210,22 +206,10 @@ class Map():
 
     def load_template(self):
         """Load a QgsComposer map from a template.
+
+        :raises: TemplateElementMissingError - when template elements are
+            missing
         """
-        self.setup_composition()
-
-        file_info = QtCore.QFileInfo(self.template)
-        template_path = file_info.absoluteDir().absolutePath()
-        template_basename = file_info.baseName()
-        system_locale = QtCore.QLocale.system().name()[:2]
-        # if template name doesn't contains locale name, try to find
-        # localized version of this template in same directory and use
-        # it for report generation
-        if system_locale.lower() not in template_basename.lower():
-            localized_template = '%s/%s-%s.qpt' % (
-                template_path, template_basename, system_locale)
-            if QtCore.QFileInfo(localized_template).exists():
-                self.template = localized_template
-
         template_file = QtCore.QFile(self.template)
         template_file.open(QtCore.QIODevice.ReadOnly | QtCore.QIODevice.Text)
         template_content = template_file.readAll()
@@ -237,9 +221,13 @@ class Map():
         # get information for substitutions
         # date, time and plugin version
         date_time = self.keyword_io.read_keywords(self.layer, 'time_stamp')
-        tokens = date_time.split('_')
-        date = tokens[0]
-        time = tokens[1]
+        if date_time is None:
+            date = ''
+            time = ''
+        else:
+            tokens = date_time.split('_')
+            date = tokens[0]
+            time = tokens[1]
         long_version = get_version()
         tokens = long_version.split('.')
         version = '%s.%s.%s' % (tokens[0], tokens[1], tokens[2])
@@ -252,11 +240,12 @@ class Map():
             'impact-title': title,
             'date': date,
             'time': time,
-            'safe-version': version
+            'safe-version': version,
+            'disclaimer': self.disclaimer
         }
         LOGGER.debug(substitution_map)
-        load_ok = self.composition.loadFromTemplate(document,
-                                                    substitution_map)
+        load_ok = self.composition.loadFromTemplate(
+            document, substitution_map)
         if not load_ok:
             raise ReportCreationError(
                 self.tr('Error loading template %s') %
@@ -265,22 +254,38 @@ class Map():
         self.page_width = self.composition.paperWidth()
         self.page_height = self.composition.paperHeight()
 
-        # set logo
+        # set InaSAFE logo
         image = self.composition.getComposerItemById('safe-logo')
         if image is not None:
-            image.setPictureFile(self.logo)
-        else:
-            raise ReportCreationError(self.tr(
-                'Image "safe-logo" could not be found'))
+            image.setPictureFile(self.safe_logo)
+
+        # set north arrow
+        image = self.composition.getComposerItemById('north-arrow')
+        if image is not None:
+            image.setPictureFile(self.north_arrow)
+
+        # set organisation logo
+        image = self.composition.getComposerItemById('organisation-logo')
+        if image is not None:
+            image.setPictureFile(self.org_logo)
+
+        # set impact report table
+        table = self.composition.getComposerItemById('impact-report')
+        if table is not None:
+            text = self.keyword_io.read_keywords(self.layer, 'impact_summary')
+            if text is None:
+                text = ''
+            table.setText(text)
+            table.setHtmlState(1)
 
         # Get the main map canvas on the composition and set
         # its extents to the event.
         composer_map = self.composition.getComposerItemById('impact-map')
         if composer_map is not None:
-            # Recenter the composer map on the center of the canvas
+            # Recenter the composer map on the center of the extent
             # Note that since the composer map is square and the canvas may be
             # arbitrarily shaped, we center based on the longest edge
-            canvas_extent = self.iface.mapCanvas().extent()
+            canvas_extent = self.extent
             width = canvas_extent.width()
             height = canvas_extent.height()
             longest_width = width
@@ -301,17 +306,40 @@ class Map():
             composer_map.setGridIntervalX(x_interval)
             y_interval = square_extent.height() / split_count
             composer_map.setGridIntervalY(y_interval)
-        else:
-            raise ReportCreationError(self.tr(
-                'Map "impact-map" could not be found'))
 
         legend = self.composition.getComposerItemById('impact-legend')
-        legend_attributes = self.map_legend_attributes()
-        LOGGER.debug(legend_attributes)
-        #legend_notes = mapLegendAttributes.get('legend_notes', None)
-        #legend_units = mapLegendAttributes.get('legend_units', None)
-        legend_title = legend_attributes.get('legend_title', None)
-        if legend_title is None:
-            legend_title = ""
-        legend.setTitle(legend_title)
-        legend.updateLegend()
+        if legend is not None:
+            legend_attributes = self.map_legend_attributes()
+            LOGGER.debug(legend_attributes)
+            #legend_notes = mapLegendAttributes.get('legend_notes', None)
+            #legend_units = mapLegendAttributes.get('legend_units', None)
+            legend_title = legend_attributes.get('legend_title', None)
+
+            symbol_count = 1
+            if self.layer.type() == QgsMapLayer.VectorLayer:
+                renderer = self.layer.rendererV2()
+                if renderer.type() in ['', '']:
+                    symbol_count = len(self.layer.legendSymbologyItems())
+            else:
+                renderer = self.layer.renderer()
+                if renderer.type() in ['']:
+                    symbol_count = len(self.layer.legendSymbologyItems())
+
+            if symbol_count <= 5:
+                legend.setColumnCount(1)
+            else:
+                legend.setColumnCount(symbol_count / 5 + 1)
+
+            if legend_title is None:
+                legend_title = ""
+            legend.setTitle(legend_title)
+            legend.updateLegend()
+
+            # remove from legend all layers, except impact one
+            model = legend.model()
+            if model.rowCount() > 0 and model.columnCount() > 0:
+                impact_item = model.findItems(self.layer.name())[0]
+                row = impact_item.index().row()
+                model.removeRows(row + 1, model.rowCount() - row)
+                if row > 0:
+                    model.removeRows(0, row)

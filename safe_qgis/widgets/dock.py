@@ -20,31 +20,39 @@ __copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
 
 import os
 import logging
-from ConfigParser import ConfigParser
 from functools import partial
 
 import numpy
 
+# noinspection PyPackageRequirements
 from PyQt4 import QtGui, QtCore
-from PyQt4.QtGui import QFileDialog
+# noinspection PyPackageRequirements
 from PyQt4.QtCore import pyqtSlot, QSettings, pyqtSignal
+from PyQt4.QtGui import QColor
 from qgis.core import (
+    QgsCoordinateTransform,
+    QgsRectangle,
+    QgsPoint,
     QgsMapLayer,
-    QgsRasterLayer,
     QgsMapLayerRegistry,
     QgsCoordinateReferenceSystem,
     QGis)
+from qgis.gui import QgsRubberBand
 from third_party.pydispatch import dispatcher
 from safe_qgis.ui.dock_base import Ui_DockBase
 from safe_qgis.utilities.help import show_context_help
 from safe_qgis.utilities.utilities import (
     get_error_message,
-    getWGS84resolution,
+    get_wgs84_resolution,
     impact_attribution,
     add_ordered_combo_item,
     extent_to_geo_array,
     viewport_geo_array,
     read_impact_layer)
+from safe_qgis.utilities.defaults import (
+    limitations,
+    disclaimer,
+    default_organisation_logo_path)
 from safe_qgis.utilities.styling import (
     setRasterStyle,
     set_vector_graduated_style,
@@ -53,11 +61,11 @@ from safe_qgis.utilities.memory_checker import check_memory_usage
 from safe_qgis.utilities.impact_calculator import ImpactCalculator
 from safe_qgis.safe_interface import (
     load_plugins,
-    availableFunctions,
+    available_functions,
     get_function_title,
-    getOptimalExtent,
-    getBufferedExtent,
-    getSafeImpactFunctions,
+    get_optimal_extent,
+    get_buffered_extent,
+    get_safe_impact_function,
     safeTr,
     get_version,
     temp_dir,
@@ -94,7 +102,9 @@ from safe_qgis.report.map import Map
 from safe_qgis.report.html_renderer import HtmlRenderer
 from safe_qgis.impact_statistics.function_options_dialog import (
     FunctionOptionsDialog)
+from safe_qgis.tools.about_dialog import AboutDialog
 from safe_qgis.tools.keywords_dialog import KeywordsDialog
+from safe_qgis.tools.impact_report_dialog import ImpactReportDialog
 from safe_qgis.safe_interface import styles
 
 PROGRESS_UPDATE_STYLE = styles.PROGRESS_UPDATE_STYLE
@@ -102,10 +112,11 @@ INFO_STYLE = styles.INFO_STYLE
 WARNING_STYLE = styles.WARNING_STYLE
 KEYWORD_STYLE = styles.KEYWORD_STYLE
 SUGGESTION_STYLE = styles.SUGGESTION_STYLE
-LOGO_ELEMENT = m.Image('qrc:/plugins/inasafe/inasafe-logo.svg', 'InaSAFE Logo')
+SMALL_ICON_STYLE = styles.SMALL_ICON_STYLE
+LOGO_ELEMENT = m.Image('qrc:/plugins/inasafe/inasafe-logo.png', 'InaSAFE Logo')
 LOGGER = logging.getLogger('InaSAFE')
 
-#from pydev import pydevd  # pylint: disable=F0401
+# from pydev import pydevd  # pylint: disable=F0401
 
 
 #noinspection PyArgumentList
@@ -130,8 +141,9 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             http://doc.qt.nokia.com/4.7-snapshot/designer-using-a-ui-file.html
         """
         # Enable remote debugging - should normally be commented out.
-        #pydevd.settrace('localhost', port=5678, stdoutToServer=True,
-        #               stderrToServer=True)
+        # pydevd.settrace(
+        #    'localhost', port=5678, stdoutToServer=True,
+        #    stderrToServer=True)
 
         QtGui.QDockWidget.__init__(self, None)
         self.setupUi(self)
@@ -152,19 +164,28 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.state = None
         self.last_used_function = ''
 
+        self.composer = None
+        self.composition = None
+
         # Flag used to prevent recursion and allow bulk loads of layers to
         # trigger a single event only
         self.get_layers_lock = False
         # Flag so we can see if the dock is busy processing
         self.busy = False
 
-        self.run_in_thread_flag = False
-        self.show_only_visible_layers_flag = True
-        self.set_layer_from_title_flag = True
-        self.zoom_to_impact_flag = True
-        self.hide_exposure_flag = True
+        # Values for settings these get set in read_settings.
+        self.run_in_thread_flag = None
+        self.show_only_visible_layers_flag = None
+        self.set_layer_from_title_flag = None
+        self.zoom_to_impact_flag = None
+        self.hide_exposure_flag = None
+        self.clip_to_viewport = None
+        self.clip_hard = None
+        self.show_intermediate_layers = None
+        self.developer_mode = None
+        self.organisation_logo_path = None
 
-        self.read_settings()  # get_layers called by this
+        self.clip_parameters = None
         self.aggregator = None
         self.postprocessor_manager = None
         self.function_parameters = None
@@ -184,10 +205,16 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.grpQuestion.setEnabled(False)
         self.grpQuestion.setVisible(False)
         self.set_ok_button_status()
-        self.clip_to_viewport = True
-        self.clip_hard = False
-        self.show_intermediate_layers = False
-        self.developer_mode = False
+        # Rubber band for showing analysis extent etc.
+        # Added by Tim in version 2.1.0
+        self.last_analysis_rubberband = None
+        # This is a rubber band to show what the AOI of the
+        # next analysis will be. Also added in 2.1.0
+        self.next_analysis_rubberband = None
+        # Whether to show rubber band of last and next scenario
+        self.show_rubber_bands = False
+
+        self.read_settings()  # get_project_layers called by this
 
     def set_dock_title(self):
         """Set the title of the dock using the current version of InaSAFE."""
@@ -200,8 +227,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         except IndexError:
             version_type = 'final'
             # Allowed version names: ('alpha', 'beta', 'rc', 'final')
-        self.setWindowTitle(self.tr('InaSAFE %s %s') % (
-            version, version_type))
+        self.setWindowTitle(self.tr('InaSAFE %s %s' % (version, version_type)))
 
     def enable_messaging(self):
         """Set up the dispatcher for messaging."""
@@ -233,6 +259,12 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.pbnHelp.clicked.connect(self.show_help)
         self.pbnPrint.clicked.connect(self.print_map)
         self.pbnRunStop.clicked.connect(self.accept)
+        self.about_button.clicked.connect(self.about)
+
+    def about(self):
+        """Open the About dialog."""
+        dialog = AboutDialog(self)
+        dialog.show()
 
     def show_static_message(self, message):
         """Send a static message to the message viewer.
@@ -323,6 +355,27 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.developer_mode = settings.value(
             'inasafe/developer_mode', False, type=bool)
 
+        # whether to show or not a custom Logo
+        self.organisation_logo_path = settings.value(
+            'inasafe/organisation_logo_path',
+            default_organisation_logo_path(),
+            type=str)
+        flag = bool(settings.value(
+            'inasafe/showOrganisationLogoInDockFlag', True, type=bool))
+
+        if self.organisation_logo_path and flag:
+            dock_width = self.width()
+            self.organisation_logo.setMaximumWidth(dock_width)
+            self.organisation_logo.setPixmap(
+                QtGui.QPixmap(self.organisation_logo_path))
+            self.organisation_logo.show()
+        else:
+            self.organisation_logo.hide()
+
+        flag = bool(settings.value(
+            'inasafe/showRubberBands', False, type=bool))
+        self.show_rubber_bands = flag
+
     def connect_layer_listener(self):
         """Establish a signal/slot to listen for layers loaded in QGIS.
 
@@ -335,6 +388,8 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
 
         self.iface.mapCanvas().layersChanged.connect(self.get_layers)
         self.iface.currentLayerChanged.connect(self.layer_changed)
+        self.iface.mapCanvas().extentsChanged.connect(
+            self.show_next_analysis_extent)
 
     # pylint: disable=W0702
     def disconnect_layer_listener(self):
@@ -345,9 +400,12 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         registry = QgsMapLayerRegistry.instance()
         registry.layersWillBeRemoved.disconnect(self.get_layers)
         registry.layersAdded.disconnect(self.get_layers)
+        registry.layersRemoved.disconnect(self.get_layers)
 
         self.iface.mapCanvas().layersChanged.disconnect(self.get_layers)
         self.iface.currentLayerChanged.disconnect(self.layer_changed)
+        self.iface.mapCanvas().extentsChanged.disconnect(
+            self.show_next_analysis_extent)
 
     def getting_started_message(self):
         """Generate a message for initial application state.
@@ -360,39 +418,41 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         message.add(m.Heading('Getting started', **INFO_STYLE))
         notes = m.Paragraph(
             self.tr(
-                'To use this tool you need to add some layers to your '
-                'QGIS project. Ensure that at least one'),
-            m.EmphasizedText(self.tr('hazard'), **KEYWORD_STYLE),
-            self.tr('layer (e.g. earthquake MMI) and one '),
-            m.EmphasizedText(self.tr('exposure'), **KEYWORD_STYLE),
-            self.tr(
-                'layer (e.g. structures) are available. When you are '
-                'ready, click the '),
-            m.EmphasizedText(self.tr('Run'), **KEYWORD_STYLE),
-            self.tr('button below.'))
+                'These are the minimum steps you need to follow in order '
+                'to use InaSAFE:'))
         message.add(notes)
+        basics_list = m.NumberedList()
+        basics_list.add(m.Paragraph(
+            self.tr('Add at least one '),
+            m.ImportantText(self.tr('hazard'), **KEYWORD_STYLE),
+            self.tr(' layer (e.g. earthquake MMI) to QGIS.')))
+        basics_list.add(m.Paragraph(
+            self.tr('Add at least one '),
+            m.ImportantText(self.tr('exposure'), **KEYWORD_STYLE),
+            self.tr(' layer (e.g. structures) to QGIS.')))
+        basics_list.add(m.Paragraph(
+            self.tr(
+                'Make sure you have defined keywords for your hazard and '
+                'exposure layers. You can do this using the keywords icon '),
+            m.Image(
+                'qrc:/plugins/inasafe/show-keyword-editor.svg',
+                **SMALL_ICON_STYLE),
+            self.tr(' in the InaSAFE toolbar.')))
+        basics_list.add(m.Paragraph(
+            self.tr('Click on the '),
+            m.ImportantText(self.tr('Run'), **KEYWORD_STYLE),
+            self.tr(' button below.')))
+        message.add(basics_list)
+
         message.add(m.Heading('Limitations', **WARNING_STYLE))
         caveat_list = m.NumberedList()
-        caveat_list.add(
-            self.tr('InaSAFE is not a hazard modelling tool.'))
-        caveat_list.add(
-            self.tr(
-                'Exposure data in the form of roads (or any other line '
-                'feature) is not yet supported.'))
-        caveat_list.add(
-            self.tr(
-                'Polygon area analysis (such as land use) is not yet '
-                'supported.'))
-        caveat_list.add(
-            self.tr(
-                'Population density data must be provided in WGS84 '
-                'geographic coordinates.'))
-        caveat_list.add(
-            self.tr(
-                'Neither BNPB, AusAID, nor the World Bank-GFDRR, take any '
-                'responsibility for the correctness of outputs from InaSAFE '
-                'or decisions derived as a consequence.'))
+        for limitation in limitations():
+            caveat_list.add(limitation)
         message.add(caveat_list)
+
+        message.add(m.Heading('Disclaimer', **WARNING_STYLE))
+        message.add(m.Paragraph(disclaimer()))
+
         return message
 
     def ready_message(self):
@@ -481,6 +541,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             message = self.ready_message()
             return True, message
 
+    # noinspection PyPep8Naming
     @pyqtSlot(int)
     def on_cboHazard_currentIndexChanged(self, index):
         """Automatic slot executed when the Hazard combo is changed.
@@ -495,6 +556,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.get_functions()
         self.toggle_aggregation_combo()
         self.set_ok_button_status()
+        self.show_next_analysis_extent()
 
     @pyqtSlot(int)
     def on_cboExposure_currentIndexChanged(self, index):
@@ -510,7 +572,9 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.get_functions()
         self.toggle_aggregation_combo()
         self.set_ok_button_status()
+        self.show_next_analysis_extent()
 
+    # noinspection PyPep8Naming
     @pyqtSlot(int)
     def on_cboFunction_currentIndexChanged(self, index):
         """Automatic slot executed when the Function combo is changed.
@@ -523,11 +587,14 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         if index > -1:
             function_id = self.get_function_id()
 
-            functions = getSafeImpactFunctions(function_id)
+            functions = get_safe_impact_function(function_id)
             self.active_function = functions[0][function_id]
             self.function_parameters = None
             if hasattr(self.active_function, 'parameters'):
                 self.function_parameters = self.active_function.parameters
+            self.set_function_options_status()
+        else:
+            self.function_parameters = None
             self.set_function_options_status()
 
         self.toggle_aggregation_combo()
@@ -573,6 +640,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         else:
             self.toolFunctionOptions.setEnabled(True)
 
+    # noinspection PyPep8Naming
     @pyqtSlot()
     def on_toolFunctionOptions_clicked(self):
         """Automatic slot executed when toolFunctionOptions is clicked."""
@@ -608,7 +676,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.cboExposure.blockSignals(True)
         self.cboHazard.blockSignals(True)
 
-    @pyqtSlot('QgsMapLayer')
+    # noinspection PyUnusedLocal
     @pyqtSlot('QgsMapLayer')
     def get_layers(self, *args):
         r"""Obtain a list of layers currently loaded in QGIS.
@@ -625,13 +693,13 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
 
         ..note:: \*args is only used for debugging purposes.
         """
-
+        _ = args
         # Prevent recursion
         if self.get_layers_lock:
             return
 
-        for arg in args:
-            LOGGER.debug('get_layer argument: %s' % arg)
+        #for arg in args:
+        #    LOGGER.debug('get_layer argument: %s' % arg)
         # Map registry may be invalid if QGIS is shutting down
         registry = QgsMapLayerRegistry.instance()
         canvas_layers = self.iface.mapCanvas().layers()
@@ -727,6 +795,11 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         # will be a lot of unneeded looping around as the signal is handled
         self.connect_layer_listener()
         self.get_layers_lock = False
+        #ensure the dock keywords info panel is updated
+        #make sure to do this after the lock is released!
+        self.layer_changed(self.iface.activeLayer())
+        # Make sure to update the analysis area preview
+        self.show_next_analysis_extent()
 
     def get_functions(self):
         """Obtain a list of impact functions from the impact calculator.
@@ -759,7 +832,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         # Find out which functions can be used with these layers
         func_list = [hazard_keywords, exposure_keywords]
         try:
-            func_dict = availableFunctions(func_list)
+            func_dict = available_functions(func_list)
             # Populate the hazard combo with the available functions
             for myFunctionID in func_dict:
                 function = func_dict[myFunctionID]
@@ -807,14 +880,8 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         Obtain QgsMapLayer id from the userrole of the QtCombo for exposure
         and return it as a QgsMapLayer.
 
-        Args:
-            None
-
-        Returns:
-            QgsMapLayer - currently selected map layer in the exposure combo.
-
-        Raises:
-            None
+        :returns: Currently selected map layer in the exposure combo.
+        :rtype: QgsMapLayer
         """
 
         index = self.cboExposure.currentIndex()
@@ -846,42 +913,242 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         layer = QgsMapLayerRegistry.instance().mapLayer(layer_id)
         return layer
 
+    @pyqtSlot('bool')
+    def toggle_rubber_bands(self, flag):
+        """Disabled/enable the rendering of rubber bands.
+
+        :param flag: Flag to indicate if drawing of bands is active.
+        :type flag: bool
+        """
+        self.show_rubber_bands = flag
+        settings = QSettings()
+        settings.setValue('inasafe/showRubberBands', flag)
+        if not flag:
+            self.hide_extent()
+            self.hide_next_analysis_extent()
+        else:
+            self.show_next_analysis_extent()
+
+    def hide_next_analysis_extent(self):
+        """Hide the rubber band showing extent of the next analysis."""
+        if self.next_analysis_rubberband is not None:
+            self.next_analysis_rubberband.reset(QGis.Polygon)
+            self.next_analysis_rubberband = None
+
+    def show_next_analysis_extent(self):
+        """Update the rubber band showing where the next analysis extent is.
+
+        Primary purpose of this slot is to draw a rubber band of where the
+        analysis will be carried out based on valid intersection between
+        layers.
+
+        This slot is called on pan, zoom, layer visibility changes and
+
+        .. versionadded:: 2.1.0
+        """
+        if not self.show_rubber_bands:
+            return
+
+        self.hide_next_analysis_extent()
+        try:
+            extent = self.get_clip_parameters()[1]
+
+        except (AttributeError, InsufficientOverlapError):
+            # No layers loaded etc.
+            return
+
+        if not (isinstance(extent, list) or isinstance(extent, QgsRectangle)):
+            return
+        if isinstance(extent, list):
+            try:
+                extent = QgsRectangle(
+                    extent[0],
+                    extent[1],
+                    extent[2],
+                    extent[3])
+            except:  # yes we want to catch all exception types here
+                return
+
+        extent = self._geo_extent_to_canvas_crs(extent)
+        self.next_analysis_rubberband = QgsRubberBand(
+            self.iface.mapCanvas(), True)
+        self.next_analysis_rubberband.setColor(QColor(0, 255, 0, 100))
+        self.next_analysis_rubberband.setWidth(1)
+        update_display_flag = False
+        point = QgsPoint(extent.xMinimum(), extent.yMinimum())
+        self.next_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMaximum(), extent.yMinimum())
+        self.next_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMaximum(), extent.yMaximum())
+        self.next_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMinimum(), extent.yMaximum())
+        self.next_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMinimum(), extent.yMinimum())
+        update_display_flag = True
+        self.next_analysis_rubberband.addPoint(point, update_display_flag)
+
+    def hide_extent(self):
+        """Clear extent rubber band if any.
+
+        This method can safely be called even if there is no rubber band set.
+
+        .. versionadded:: 2.1.0
+        """
+        if self.last_analysis_rubberband is not None:
+            self.last_analysis_rubberband.reset(QGis.Polygon)
+            self.last_analysis_rubberband = None
+
+    def _geo_extent_to_canvas_crs(self, extent):
+        """Transform a bounding box into the CRS of the canvas.
+
+        :param extent: An extent in geographic coordinates.
+        :type extent: QgsRectangle
+
+        :returns: The extent in CRS of the canvas.
+        :rtype: QgsRectangle
+        """
+
+        # make sure the extent is in the same crs as the canvas
+        dest_crs = self.iface.mapCanvas().mapRenderer().destinationCrs()
+        source_crs = QgsCoordinateReferenceSystem()
+        source_crs.createFromSrid(4326)
+        transform = QgsCoordinateTransform(source_crs, dest_crs)
+        extent = transform.transformBoundingBox(extent)
+        return extent
+
+    def show_extent(self, extent):
+        """Show an extent as a rubber band on the canvas.
+
+        .. seealso:: hide_extent()
+
+        .. versionadded:: 2.1.0
+
+        :param extent: A rectangle to display on the canvas. If parameter is
+            a list it should be in the form of [xmin, ymin, xmax, ymax]
+            otherwise it will be silently ignored and this method will
+            do nothing.
+        :type extent: QgsRectangle, list
+        """
+        if not self.show_rubber_bands:
+            return
+
+        if not (isinstance(extent, list) or isinstance(extent, QgsRectangle)):
+            return
+        if isinstance(extent, list):
+            try:
+                extent = QgsRectangle(
+                    extent[0],
+                    extent[1],
+                    extent[2],
+                    extent[3])
+            except:  # yes we want to catch all exception types here
+                return
+
+        self.hide_extent()
+        extent = self._geo_extent_to_canvas_crs(extent)
+
+        self.last_analysis_rubberband = QgsRubberBand(
+            self.iface.mapCanvas(), True)
+        self.last_analysis_rubberband.setColor(QColor(255, 0, 0, 100))
+        self.last_analysis_rubberband.setWidth(2)
+        update_display_flag = False
+        point = QgsPoint(extent.xMinimum(), extent.yMinimum())
+        self.last_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMaximum(), extent.yMinimum())
+        self.last_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMaximum(), extent.yMaximum())
+        self.last_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMinimum(), extent.yMaximum())
+        self.last_analysis_rubberband.addPoint(point, update_display_flag)
+        point = QgsPoint(extent.xMinimum(), extent.yMinimum())
+        update_display_flag = True
+        self.last_analysis_rubberband.addPoint(point, update_display_flag)
+
     def setup_calculator(self):
         """Initialise ImpactCalculator based on the current state of the ui."""
-
-        hazard_layer, exposure_layer = self.optimal_clip()
-        # See if the inputs need further refinement for aggregations
-        try:
-            self.aggregator.deintersect(hazard_layer, exposure_layer)
-        except (InvalidLayerError, UnsupportedProviderError, KeywordDbError):
-            raise
-        # Identify input layers
-        self.calculator.set_hazard_layer(self.aggregator.hazard_layer.source())
-        self.calculator.set_exposure_layer(
-            self.aggregator.exposure_layer.source())
 
         # Use canonical function name to identify selected function
         function_id = self.get_function_id()
         self.calculator.set_function(function_id)
 
+        # Get the hazard and exposure layers selected in the combos
+        # and other related parameters needed for clipping.
+        # pylint: disable=W0633,W0612
+        (extra_exposure_keywords,
+         buffered_geo_extent,
+         cell_size,
+         exposure_layer,
+         geo_extent,
+         hazard_layer) = self.clip_parameters
+
+        self.show_extent(buffered_geo_extent)
+        # pylint: enable=W0633,W0612
+
+        if self.calculator.requires_clipping():
+            # The impact function uses SAFE layers,
+            # clip them
+            hazard_layer, exposure_layer = self.optimal_clip()
+            self.aggregator.set_layers(hazard_layer, exposure_layer)
+            # Extent is calculated in the aggregator:
+            self.calculator.set_extent(None)
+
+            # See if the inputs need further refinement for aggregations
+            try:
+                # This line is a fix for #997
+                self.aggregator.validate_keywords()
+                self.aggregator.deintersect()
+            except (InvalidLayerError,
+                    UnsupportedProviderError,
+                    KeywordDbError):
+                raise
+            # Get clipped layers
+            hazard_layer = self.aggregator.hazard_layer
+            exposure_layer = self.aggregator.exposure_layer
+        else:
+            # It is a 'new-style' impact function,
+            # clipping doesn't needed, but we need to set up extent
+            self.aggregator.set_layers(hazard_layer, exposure_layer)
+            self.calculator.set_extent(buffered_geo_extent)
+
+        # Identify input layers
+        self.calculator.set_hazard_layer(hazard_layer)
+        self.calculator.set_exposure_layer(exposure_layer)
+
+    def get_extent_as_array(self):
+        """Return current extent as array
+
+        :returns: a list in the form [xmin, ymin, xmax, ymax] where all
+                coordinates provided are in Geographic / EPSG:4326.
+        :rtype: list
+        """
+        # TODO: This function is not covered by tests
+
+        rectangle = self.iface.mapCanvas().extent()
+        if self.iface.mapCanvas().hasCrsTransformEnabled():
+            crs = self.iface.mapCanvas().mapRenderer().destinationCrs()
+        else:
+            crs = QgsCoordinateReferenceSystem()
+            crs.createFromSrid(4326)
+        geo_extent = extent_to_geo_array(rectangle, crs)
+
+        return geo_extent
+
     def prepare_aggregator(self):
         """Create an aggregator for this analysis run."""
+
+        if self.clip_parameters is None:
+            raise Exception(self.tr('Clip parameters are not set!'))
+        buffered_geo_extent = self.clip_parameters[1]
+
+        #setup aggregator to use buffered_geo_extent to deal with #759
         self.aggregator = Aggregator(
-            self.iface,
+            buffered_geo_extent,
             self.get_aggregation_layer())
         self.aggregator.show_intermediate_layers = \
             self.show_intermediate_layers
         # Buffer aggregation keywords in case user presses cancel on kw dialog
-        try:
-            original_keywords = self.keyword_io.read_keywords(
-                self.aggregator.layer)
-        except AttributeError:
-            original_keywords = {}
-        except NoKeywordsFoundError:
-            # No kw file was found for layer - create an empty one.
-            original_keywords = {}
-            self.keyword_io.write_keywords(
-                self.aggregator.layer, original_keywords)
+        original_keywords = self.keyword_io.read_keywords(
+            self.aggregator.layer)
         LOGGER.debug('my pre dialog keywords' + str(original_keywords))
         LOGGER.debug(
             'AOImode: %s' % str(self.aggregator.aoi_mode))
@@ -902,24 +1169,54 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             of the web view after model completion are asynchronous (when
             threading mode is enabled especially)
         """
+        self.wvResults.clear_dynamic_messages_log()
         title = self.tr('Processing started')
         details = self.tr(
             'Please wait - processing may take a while depending on your '
             'hardware configuration and the analysis extents and data.')
         #TODO style these.
+
+        hazard_layer = self.get_hazard_layer()
+        exposure_layer = self.get_exposure_layer()
+        aggregation_layer = self.get_aggregation_layer()
+
+        # trap for issue 706
+        try:
+            exposure_name = exposure_layer.name()
+            hazard_name = hazard_layer.name()
+            #aggregation layer could be set to AOI so no check for that
+        except AttributeError:
+            title = self.tr('No valid layers')
+            details = self.tr(
+                'Please ensure your hazard and exposure layers are set '
+                'in the question area and then press run again.')
+            message = m.Message(
+                LOGO_ELEMENT,
+                m.Heading(title, **WARNING_STYLE),
+                m.Paragraph(details))
+            self.show_static_message(message)
+            self.grpQuestion.show()
+            self.pbnRunStop.setDisabled(True)
+            return
+
         text = m.Text(
             self.tr('This analysis will calculate the impact of'),
-            m.EmphasizedText(self.get_hazard_layer().name()),
+            m.EmphasizedText(hazard_name),
             self.tr('on'),
-            m.EmphasizedText(self.get_exposure_layer().name()),
+            m.EmphasizedText(exposure_name),
         )
 
         if self.get_aggregation_layer() is not None:
-            text.add(m.Text(
-                self.tr('and bullet_list the results'),
-                m.ImportantText(self.tr('aggregated by')),
-                m.EmphasizedText(self.get_aggregation_layer().name()))
-            )
+            try:
+                aggregation_name = aggregation_layer.name()
+                text.add(m.Text(
+                    self.tr('and bullet_list the results'),
+                    m.ImportantText(self.tr('aggregated by')),
+                    m.EmphasizedText(aggregation_name))
+                )
+            except AttributeError:
+                pass
+
         text.add('.')
 
         message = m.Message(
@@ -931,7 +1228,11 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         try:
             # add which postprocessors will run when appropriated
             post_processors_names = self.function_parameters['postprocessors']
-            post_processors = get_postprocessors(post_processors_names)
+            # aggregator is not ready yet here so we can't use
+            # self.aggregator.aoi_mode
+            aoi_mode = self.get_aggregation_layer() is None
+            post_processors = get_postprocessors(
+                post_processors_names, aoi_mode)
             message.add(m.Paragraph(self.tr(
                 'The following postprocessors will be used:')))
 
@@ -963,8 +1264,9 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
 
         # Find out what the usable extent and cellsize are
         try:
-            _, buffered_geoextent, cell_size, _, _, _ = \
-                self.get_clip_parameters()
+            self.clip_parameters = self.get_clip_parameters()
+            buffered_geoextent = self.clip_parameters[1]
+            cell_size = self.clip_parameters[2]
         except (RuntimeError, InsufficientOverlapError, AttributeError) as e:
             LOGGER.exception('Error calculating extents. %s' % str(e.message))
             context = self.tr(
@@ -1003,7 +1305,6 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             # disable gui elements that should not be applicable for this
             self.runtime_keywords_dialog.radExposure.setEnabled(False)
             self.runtime_keywords_dialog.radHazard.setEnabled(False)
-            self.runtime_keywords_dialog.pbnAdvanced.setEnabled(False)
             self.runtime_keywords_dialog.setModal(True)
             self.runtime_keywords_dialog.show()
 
@@ -1043,12 +1344,28 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.busy = True
 
     def run(self):
-        """Execute analysis when ok button on dock is clicked."""
+        """Execute analysis when run button on dock is clicked."""
+
+        hazard_layer = self.get_hazard_layer()
+        exposure_layer = self.get_exposure_layer()
+
+        if exposure_layer is None or hazard_layer is None:
+            title = self.tr('No valid layers')
+            details = self.tr(
+                'Please ensure your hazard and exposure layers are set '
+                'in the question area and then press run again.')
+            message = m.Message(
+                LOGO_ELEMENT,
+                m.Heading(title, **WARNING_STYLE),
+                m.Paragraph(details))
+            self.show_static_message(message)
+            return
 
         self.enable_busy_cursor()
 
         # Start the analysis
         try:
+
             self.setup_calculator()
         except CallGDALError, e:
             self.analysis_error(e, self.tr(
@@ -1165,7 +1482,14 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             self.analysis_error(e, self.tr('Error loading impact layer.'))
         else:
             # On success, display generated report
-            self.show_static_message(m.Message(report))
+            impact_path = qgis_impact_layer.source()
+            message = m.Message(report)
+            #message.add(m.Heading(self.tr('View processing log as HTML'),
+            #                      **INFO_STYLE))
+            #message.add(m.Link('file://%s' % self.wvResults.log_path))
+            self.show_static_message(message)
+            self.wvResults.impact_path = impact_path
+
         self.save_state()
         self.hide_busy()
         self.analysisDone.emit(True)
@@ -1219,10 +1543,9 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         elif engine_impact_layer.is_raster:
             LOGGER.debug('myEngineImpactLayer.is_raster')
             if not style:
-                qgis_impact_layer.setDrawingStyle(
-                    QgsRasterLayer.SingleBandPseudoColor)
-                qgis_impact_layer.setColorShadingAlgorithm(
-                    QgsRasterLayer.PseudoColorShader)
+                qgis_impact_layer.setDrawingStyle("SingleBandPseudoColor")
+                #qgis_impact_layer.setColorShadingAlgorithm(
+                #    QgsRasterLayer.PseudoColorShader)
             else:
                 setRasterStyle(qgis_impact_layer, style)
 
@@ -1239,6 +1562,8 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             layers_to_add.append(self.aggregator.layer)
         layers_to_add.append(qgis_impact_layer)
         QgsMapLayerRegistry.instance().addMapLayers(layers_to_add)
+        # make sure it is active in the legend - needed since QGIS 2.4
+        self.iface.setActiveLayer(qgis_impact_layer)
         # then zoom to it
         if self.zoom_to_impact_flag:
             self.iface.zoomToActiveLayer()
@@ -1246,6 +1571,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             exposure_layer = self.get_exposure_layer()
             legend = self.iface.legendInterface()
             legend.setLayerVisible(exposure_layer, False)
+
         self.restore_state()
 
         # append postprocessing report
@@ -1272,7 +1598,14 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         self.pbnShowQuestion.setVisible(True)
         self.grpQuestion.setEnabled(True)
         self.grpQuestion.setVisible(False)
-        self.pbnRunStop.setEnabled(True)
+        # for #706 - if the exposure is hidden
+        # due to self.hide_exposure_flag being enabled
+        # we may have no exposure layers left
+        # so we handle that here and disable run
+        if self.cboExposure.count() == 0:
+            self.pbnRunStop.setEnabled(False)
+        else:
+            self.pbnRunStop.setEnabled(True)
         self.repaint()
         self.disable_busy_cursor()
         self.busy = False
@@ -1289,7 +1622,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             message = str(self.tr(
                 'No impact layer was calculated. Error message: %s\n'
             ) % (str(result)))
-            exception = self.runner.lastException()
+            exception = self.runner.last_exception()
             if isinstance(exception, ZeroImpactException):
                 report = m.Message()
                 report.add(LOGO_ELEMENT)
@@ -1353,7 +1686,8 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         """
         LOGGER.debug('Do postprocessing')
         self.postprocessor_manager = PostprocessorManager(self.aggregator)
-        self.postprocessor_manager.functionParams = self.function_parameters
+        self.postprocessor_manager.function_parameters = \
+            self.function_parameters
         self.postprocessor_manager.run()
         self.completed()
         self.analysisDone.emit(True)
@@ -1367,6 +1701,61 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
     def disable_busy_cursor():
         """Disable the hourglass cursor and listen for layer changes."""
         QtGui.qApp.restoreOverrideCursor()
+
+    def generate_insufficient_overlap_message(
+            self,
+            e,
+            exposure_geoextent,
+            exposure_layer,
+            hazard_geoextent,
+            hazard_layer,
+            viewport_geoextent):
+        """
+
+        :param e: An exception.
+        :param exposure_geoextent: Extent of the exposure layer.
+        :param exposure_layer: Exposure layer.
+        :param hazard_geoextent: Extent of the hazard layer.
+        :param hazard_layer:  Hazard layer instance.
+        :param viewport_geoextent: Viewport extents.
+
+        :return: An InaSAFE message object.
+        """
+        description = self.tr(
+            'There was insufficient overlap between the input layers '
+            'and / or the layers and the viewable area. Please select two '
+            'overlapping layers and zoom or pan to them or disable '
+            'viewable area clipping in the options dialog. Full details '
+            'follow:')
+        message = m.Message(description)
+        text = m.Paragraph(
+            self.tr('Failed to obtain the optimal extent given:'))
+        message.add(text)
+        analysis_inputs = m.BulletedList()
+        # We must use Qt string interpolators for tr to work properly
+        analysis_inputs.add(
+            self.tr('Hazard: %s') % (
+                hazard_layer.source()))
+        analysis_inputs.add(
+            self.tr('Exposure: %s') % (
+                exposure_layer.source()))
+        analysis_inputs.add(
+            self.tr('Viewable area Geo Extent: %s') % (
+                str(viewport_geoextent)))
+        analysis_inputs.add(
+            self.tr('Hazard Geo Extent: %s') % (
+                str(hazard_geoextent)))
+        analysis_inputs.add(
+            self.tr('Exposure Geo Extent: %s') % (
+                str(exposure_geoextent)))
+        analysis_inputs.add(
+            self.tr('Viewable area clipping enabled: %s') % (
+                str(self.clip_to_viewport)))
+        analysis_inputs.add(
+            self.tr('Details: %s') % (
+                str(e)))
+        message.add(analysis_inputs)
+        return message
 
     def get_clip_parameters(self):
         """Calculate the best extents to use for the assessment.
@@ -1413,56 +1802,23 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             # Extent is returned as an array [xmin,ymin,xmax,ymax]
             # We will convert it to a QgsRectangle afterwards.
             if self.clip_to_viewport:
-                geo_extent = getOptimalExtent(
+                geo_extent = get_optimal_extent(
                     hazard_geoextent,
                     exposure_geoextent,
                     viewport_geoextent)
             else:
-                geo_extent = getOptimalExtent(
+                geo_extent = get_optimal_extent(
                     hazard_geoextent,
                     exposure_geoextent)
 
         except InsufficientOverlapError, e:
-            # FIXME (MB): This branch is not covered by the tests
-            description = self.tr(
-                'There was insufficient overlap between the input layers '
-                'and / or the layers and the viewable area. Please select two '
-                'overlapping layers and zoom or pan to them or disable '
-                'viewable area clipping in the options dialog. Full details '
-                'follow:')
-            message = m.Message(description)
-            text = m.Paragraph(
-                self.tr('Failed to obtain the optimal extent given:'))
-            message.add(text)
-            analysis_inputs = m.BulletedList()
-            # We must use Qt string interpolators for tr to work properly
-            analysis_inputs.add(
-                self.tr('Hazard: %s') % (
-                    hazard_layer.source()))
-
-            analysis_inputs.add(
-                self.tr('Exposure: %s') % (
-                    exposure_layer.source()))
-
-            analysis_inputs.add(
-                self.tr('Viewable area Geo Extent: %s') % (
-                    str(viewport_geoextent)))
-
-            analysis_inputs.add(
-                self.tr('Hazard Geo Extent: %s') % (
-                    str(hazard_geoextent)))
-
-            analysis_inputs.add(
-                self.tr('Exposure Geo Extent: %s') % (
-                    str(exposure_geoextent)))
-
-            analysis_inputs.add(
-                self.tr('Viewable area clipping enabled: %s') % (
-                    str(self.clip_to_viewport)))
-            analysis_inputs.add(
-                self.tr('Details: %s') % (
-                    str(e)))
-            message.add(analysis_inputs)
+            message = self.generate_insufficient_overlap_message(
+                e,
+                exposure_geoextent,
+                exposure_layer,
+                hazard_geoextent,
+                hazard_layer,
+                viewport_geoextent)
             raise InsufficientOverlapError(message)
 
         # Next work out the ideal spatial resolution for rasters
@@ -1477,13 +1833,20 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         extra_exposure_keywords = {}
         if hazard_layer.type() == QgsMapLayer.RasterLayer:
             # Hazard layer is raster
-            hazard_geo_cell_size = getWGS84resolution(hazard_layer)
+            hazard_geo_cell_size = get_wgs84_resolution(hazard_layer)
 
             if exposure_layer.type() == QgsMapLayer.RasterLayer:
                 # In case of two raster layers establish common resolution
-                exposure_geo_cell_size = getWGS84resolution(exposure_layer)
-
-                if hazard_geo_cell_size < exposure_geo_cell_size:
+                exposure_geo_cell_size = get_wgs84_resolution(exposure_layer)
+                # See issue #1008 - the flag below is used to indicate
+                # if the user wishes to prevent resampling of exposure data
+                keywords = self.keyword_io.read_keywords(exposure_layer)
+                allow_resampling_flag = True
+                if 'allow_resampling' in keywords:
+                    allow_resampling_flag = keywords[
+                        'allow_resampling'].lower() == 'true'
+                if hazard_geo_cell_size < exposure_geo_cell_size and \
+                        allow_resampling_flag:
                     cell_size = hazard_geo_cell_size
                 else:
                     cell_size = exposure_geo_cell_size
@@ -1499,7 +1862,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
                 # resolution to be available
                 if exposure_layer.type() != QgsMapLayer.VectorLayer:
                     raise RuntimeError
-                buffered_geoextent = getBufferedExtent(
+                buffered_geoextent = get_buffered_extent(
                     geo_extent,
                     hazard_geo_cell_size)
         else:
@@ -1510,6 +1873,7 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             # as centers for evacuation circles: See issue #285
             if hazard_layer.geometryType() == QGis.Point:
                 geo_extent = exposure_geoextent
+                buffered_geoextent = geo_extent
 
         return (
             extra_exposure_keywords,
@@ -1522,29 +1886,27 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
     def optimal_clip(self):
         """ A helper function to perform an optimal clip of the input data.
         Optimal extent should be considered as the intersection between
-        the three inputs. The inasafe library will perform various checks
+        the three inputs. The InaSAFE library will perform various checks
         to ensure that the extent is tenable, includes data from both
         etc.
 
         The result of this function will be two layers which are
-        clipped and resampled if needed, and in the EPSG:4326 geographic
+        clipped and re-sampled if needed, and in the EPSG:4326 geographic
         coordinate reference system.
 
-        Args:
-            None
-        Returns:
-            A two-tuple containing the clipped hazard and exposure layers.
-
-        Raises:
-            Any exceptions raised by the InaSAFE library will be propagated.
+        :returns: The clipped hazard and exposure layers.
+        :rtype: (QgsMapLayer, QgsMapLayer)
         """
 
         # Get the hazard and exposure layers selected in the combos
         # and other related parameters needed for clipping.
         try:
-            (extra_exposure_keywords, buffered_geo_extent, cell_size,
-             exposure_layer, geo_extent, hazard_layer) = \
-                self.get_clip_parameters()
+            extra_exposure_keywords = self.clip_parameters[0]
+            buffered_geo_extent = self.clip_parameters[1]
+            cell_size = self.clip_parameters[2]
+            exposure_layer = self.clip_parameters[3]
+            geo_extent = self.clip_parameters[4]
+            hazard_layer = self.clip_parameters[5]
         except:
             raise
         # Make sure that we have EPSG:4326 versions of the input layers
@@ -1632,15 +1994,15 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
             'The following keywords are defined for the active layer:')))
         self.pbnPrint.setEnabled(False)
         keywords_list = m.BulletedList()
-        for myKeyword in keywords:
-            value = keywords[myKeyword]
+        for keyword in keywords:
+            value = keywords[keyword]
 
             # Translate titles explicitly if possible
-            if myKeyword == 'title':
+            if keyword == 'title':
                 value = safeTr(value)
                 # Add this keyword to report
             key = m.ImportantText(
-                self.tr(myKeyword.capitalize()))
+                self.tr(keyword.capitalize()))
             value = str(value)
             keywords_list.add(m.Text(key, value))
 
@@ -1765,7 +2127,24 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
                 break
 
     def print_map(self):
-        """Slot to print map when print map button pressed."""
+        """Slot to open impact report dialog that used to tune report
+        when print map button pressed."""
+        print_dialog = ImpactReportDialog(self.iface)
+        if not print_dialog.exec_() == QtGui.QDialog.Accepted:
+            self.show_dynamic_message(
+                m.Message(
+                    m.Heading(self.tr('Map Creator'), **WARNING_STYLE),
+                    m.Text(self.tr('Report generation cancelled!'))))
+            return
+
+        use_full_extent = print_dialog.analysis_extent_radio.isChecked()
+        create_pdf = print_dialog.create_pdf
+        if print_dialog.default_template_radio.isChecked():
+            template_path = print_dialog.template_combo.itemData(
+                print_dialog.template_combo.currentIndex())
+        else:
+            template_path = print_dialog.template_path.text()
+
         print_map = Map(self.iface)
         if self.iface.activeLayer() is None:
             # noinspection PyCallByClass,PyTypeChecker
@@ -1781,69 +2160,154 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
                 m.Heading(self.tr('Map Creator'), **PROGRESS_UPDATE_STYLE),
                 m.Text(self.tr('Preparing map and report'))))
 
+        # Set all the map components
         print_map.set_impact_layer(self.iface.activeLayer())
+        if use_full_extent:
+            map_crs = self.iface.mapCanvas().mapRenderer().destinationCrs()
+            layer_crs = self.iface.activeLayer().crs()
+            layer_extent = self.iface.activeLayer().extent()
+            if map_crs != layer_crs:
+                transform = QgsCoordinateTransform(layer_crs, map_crs)
+                layer_extent = transform.transformBoundingBox(layer_extent)
+            print_map.set_extent(layer_extent)
+        else:
+            print_map.set_extent(self.iface.mapCanvas().extent())
 
         settings = QSettings()
-        logo_path = settings.value('inasafe/mapsLogoPath', '', type=str)
-        report_path = settings.value(
-            'inasafe/reportTemplatePath', '', type=str)
+        logo_path = settings.value(
+            'inasafe/organisation_logo_path', '', type=str)
         if logo_path != '':
-            print_map.set_logo(logo_path)
-        if report_path != '':
-            print_map.set_template(report_path)
+            print_map.set_organisation_logo(logo_path)
+
+        disclaimer_text = settings.value(
+            'inasafe/reportDisclaimer', '', type=str)
+        if disclaimer_text != '':
+            print_map.set_disclaimer(disclaimer_text)
+
+        north_arrow_path = settings.value(
+            'inasafe/north_arrow_path', '', type=str)
+        if north_arrow_path != '':
+            print_map.set_north_arrow_image(north_arrow_path)
+
+        template_warning_verbose = bool(settings.value(
+            'inasafe/template_warning_verbose', True, type=bool))
+
+        print_map.set_template(template_path)
+
+        # Get missing elements on template
+        # AG: This is a quick fix to adapt with QGIS >= 2.4
+        # https://github.com/AIFDR/inasafe/issues/911
+        # We'll need to refactor report modules
+        component_ids = ['safe-logo', 'north-arrow', 'organisation-logo',
+                         'impact-map', 'impact-legend']
+        missing_elements = []
+        template_file = QtCore.QFile(template_path)
+        template_file.open(QtCore.QIODevice.ReadOnly | QtCore.QIODevice.Text)
+        template_content = template_file.readAll()
+        for component_id in component_ids:
+            if component_id not in template_content:
+                missing_elements.append(component_id)
+
+        if template_warning_verbose and len(missing_elements) != 0:
+            title = self.tr('Template is missing some elements')
+            question = self.tr(
+                'The composer template you are printing to is missing '
+                'these elements: %s. Do you still want to continue') % (
+                    ', '.join(missing_elements))
+            # noinspection PyCallByClass,PyTypeChecker
+            answer = QtGui.QMessageBox.question(
+                self,
+                title,
+                question,
+                QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
+
+            if answer == QtGui.QMessageBox.No:
+                return
 
         LOGGER.debug('Map Title: %s' % print_map.map_title())
-        default_file_name = print_map.map_title() + '.pdf'
-        default_file_name = default_file_name.replace(' ', '_')
-        # noinspection PyCallByClass,PyTypeChecker
-        map_pdf_path = QtGui.QFileDialog.getSaveFileName(
-            self, self.tr('Write to PDF'),
-            os.path.join(temp_dir(), default_file_name),
-            self.tr('Pdf File (*.pdf)'))
-        map_pdf_path = str(map_pdf_path)
+        if create_pdf:
+            print_map.setup_composition()
+            print_map.load_template()
+            if print_map.map_title() is not None:
+                default_file_name = print_map.map_title() + '.pdf'
+            else:
+                self.show_error_message(
+                    self.tr('Keyword "map_title" not found.'))
+                return
 
-        if map_pdf_path is None or map_pdf_path == '':
-            self.show_dynamic_message(
-                m.Message(
-                    m.Heading(self.tr('Map Creator'), **WARNING_STYLE),
-                    m.Text(self.tr('Printing cancelled!'))))
-            return
+            default_file_name = default_file_name.replace(' ', '_')
+            # noinspection PyCallByClass,PyTypeChecker
+            map_pdf_path = QtGui.QFileDialog.getSaveFileName(
+                self, self.tr('Write to PDF'),
+                os.path.join(temp_dir(), default_file_name),
+                self.tr('Pdf File (*.pdf)'))
+            map_pdf_path = str(map_pdf_path)
 
-        table_file_name = os.path.splitext(map_pdf_path)[0] + '_table.pdf'
-        html_renderer = HtmlRenderer(page_dpi=print_map.page_dpi)
-        keywords = self.keyword_io.read_keywords(self.iface.activeLayer())
-        html_pdf_path = html_renderer.print_impact_table(
-            keywords, filename=table_file_name)
+            if map_pdf_path is None or map_pdf_path == '':
+                self.show_dynamic_message(
+                    m.Message(
+                        m.Heading(self.tr('Map Creator'), **WARNING_STYLE),
+                        m.Text(self.tr('Printing cancelled!'))))
+                return
 
-        try:
-            print_map.make_pdf(map_pdf_path)
-        except Exception, e:  # pylint: disable=W0703
-            # FIXME (Ole): This branch is not covered by the tests
-            report = get_error_message(e)
-            self.show_error_message(report)
+            table_file_name = os.path.splitext(map_pdf_path)[0] + '_table.pdf'
+            html_renderer = HtmlRenderer(page_dpi=print_map.page_dpi)
+            keywords = self.keyword_io.read_keywords(self.iface.activeLayer())
+            html_pdf_path = html_renderer.print_impact_table(
+                keywords, filename=table_file_name)
 
-        # Make sure the file paths can wrap nicely:
-        wrapped_map_path = map_pdf_path.replace(os.sep, '<wbr>' + os.sep)
-        wrapped_html_path = html_pdf_path.replace(os.sep, '<wbr>' + os.sep)
-        status = m.Message(
-            m.Heading(self.tr('Map Creator'), **INFO_STYLE),
-            m.Paragraph(self.tr(
-                'Your PDF was created....opening using the default PDF viewer '
-                'on your system. The generated pdfs were saved as:')),
-            m.Paragraph(wrapped_map_path),
-            m.Paragraph(self.tr('and')),
-            m.Paragraph(wrapped_html_path))
+            try:
+                print_map.make_pdf(map_pdf_path)
+            except Exception, e:  # pylint: disable=W0703
+                # FIXME (Ole): This branch is not covered by the tests
+                report = get_error_message(e)
+                self.show_error_message(report)
 
-        # noinspection PyCallByClass,PyTypeChecker,PyTypeChecker
-        QtGui.QDesktopServices.openUrl(
-            QtCore.QUrl('file:///' + html_pdf_path,
-                        QtCore.QUrl.TolerantMode))
-        # noinspection PyCallByClass,PyTypeChecker,PyTypeChecker
-        QtGui.QDesktopServices.openUrl(
-            QtCore.QUrl('file:///' + map_pdf_path,
-                        QtCore.QUrl.TolerantMode))
+            # Make sure the file paths can wrap nicely:
+            wrapped_map_path = map_pdf_path.replace(os.sep, '<wbr>' + os.sep)
+            wrapped_html_path = html_pdf_path.replace(os.sep, '<wbr>' + os.sep)
+            status = m.Message(
+                m.Heading(self.tr('Map Creator'), **INFO_STYLE),
+                m.Paragraph(self.tr(
+                    'Your PDF was created....opening using the default PDF '
+                    'viewer on your system. The generated pdfs were saved '
+                    'as:')),
+                m.Paragraph(wrapped_map_path),
+                m.Paragraph(self.tr('and')),
+                m.Paragraph(wrapped_html_path))
 
-        self.show_dynamic_message(status)
+            # noinspection PyCallByClass,PyTypeChecker,PyTypeChecker
+            QtGui.QDesktopServices.openUrl(
+                QtCore.QUrl('file:///' + html_pdf_path,
+                            QtCore.QUrl.TolerantMode))
+            # noinspection PyCallByClass,PyTypeChecker,PyTypeChecker
+            QtGui.QDesktopServices.openUrl(
+                QtCore.QUrl('file:///' + map_pdf_path,
+                            QtCore.QUrl.TolerantMode))
+            self.show_dynamic_message(status)
+        else:
+            # AG:
+            # See https://github.com/AIFDR/inasafe/issues/911
+            # We need to set the composition to the composer before loading
+            # the template
+            print_map.setup_composition()
+            self.composer = self.iface.createNewComposer()
+            self.composer.setComposition(print_map.composition)
+            print_map.load_template()
+
+            # Zoom to Full Extent
+            number_pages = print_map.composition.numPages()
+            if number_pages > 0:
+                height = \
+                    print_map.composition.paperHeight() * number_pages + \
+                    print_map.composition.spaceBetweenPages() * \
+                    (number_pages - 1)
+                self.composer.fitInView(
+                    0, 0,
+                    print_map.composition.paperWidth() + 1,
+                    height + 1,
+                    QtCore.Qt.KeepAspectRatio)
+
         self.hide_busy()
 
     def get_function_id(self, index=None):
@@ -1864,132 +2328,3 @@ class Dock(QtGui.QDockWidget, Ui_DockBase):
         item_data = self.cboFunction.itemData(index, QtCore.Qt.UserRole)
         function_id = '' if item_data is None else str(item_data)
         return function_id
-
-    @staticmethod
-    def scenario_layer_paths(exposure_path, hazard_path, scenario_path):
-        """Calculate the paths for hazard and exposure relative to scenario.
-
-        :param exposure_path: Public path for exposure.
-        :type exposure_path: str
-
-        :param hazard_path: Public path for hazard.
-        :type hazard_path: str
-
-        :param scenario_path: Path to scenario file.
-        :type scenario_path: str
-
-        :return: Tuple of relative paths for exposure and hazard.
-        :rtype: (str, str)
-        """
-        start_path = os.path.dirname(scenario_path)
-        try:
-            relative_expsosure_path = os.path.relpath(
-                exposure_path, start_path)
-        except ValueError, e:
-            LOGGER.info(e.message)
-            relative_expsosure_path = exposure_path
-        try:
-            relative_hazard_path = os.path.relpath(hazard_path, start_path)
-        except ValueError, e:
-            LOGGER.info(e.message)
-            relative_hazard_path = hazard_path
-
-        return relative_expsosure_path, relative_hazard_path
-
-    def save_current_scenario(self, scenario_file_path=None):
-        """Save current scenario to a text file.
-
-        You can use the saved scenario with the batch runner.
-
-        :param scenario_file_path: A path to the scenario file.
-        :type scenario_file_path: str
-
-        """
-        LOGGER.info('saveCurrentScenario')
-        warning_title = self.tr('InaSAFE Save Scenario Warning')
-        # get data layer
-        # get absolute path of exposure & hazard layer, or the contents
-        exposure_layer = self.get_exposure_layer()
-        hazard_layer = self.get_hazard_layer()
-        aggregation_layer = self.get_aggregation_layer()
-        function_id = self.get_function_id(self.cboFunction.currentIndex())
-        extent = viewport_geo_array(self.iface.mapCanvas())
-        # make it look like this:
-        # 109.829170982, -8.13333290561, 111.005344795, -7.49226294379
-        extent_string = ', '.join(('%f' % x) for x in extent)
-
-        # Checking f exposure and hazard layer is not None
-        if exposure_layer is None:
-            warning_message = self.tr(
-                'Exposure layer is not found, can not save scenario. Please '
-                'add exposure layer to do so.')
-            # noinspection PyCallByClass,PyTypeChecker
-            QtGui.QMessageBox.warning(self, warning_title, warning_message)
-            return
-        if hazard_layer is None:
-            warning_message = self.tr(
-                'Hazard layer is not found, can not save scenario. Please add '
-                'hazard layer to do so.')
-            # noinspection PyCallByClass,PyTypeChecker
-            QtGui.QMessageBox.warning(self, warning_title, warning_message)
-            return
-
-        # Checking if function id is not None
-        if function_id == '' or function_id is None:
-            warning_message = self.tr(
-                'The impact function is empty, can not save scenario')
-            # noinspection PyCallByClass,PyTypeChecker
-            QtGui.QMessageBox.question(self, warning_title, warning_message)
-            return
-
-        exposure_path = str(exposure_layer.publicSource())
-        hazard_path = str(hazard_layer.publicSource())
-
-        title = self.keyword_io.read_keywords(hazard_layer, 'title')
-        title = safeTr(title)
-
-        title_dialog = self.tr('Save Scenario')
-        # get last dir from setting
-        settings = QSettings()
-        last_save_dir = settings.value('inasafe/lastSourceDir', '.')
-        default_name = title.replace(
-            ' ', '_').replace('(', '').replace(')', '')
-        if scenario_file_path is None:
-            # noinspection PyCallByClass,PyTypeChecker
-            file_name = str(QFileDialog.getSaveFileName(
-                self, title_dialog,
-                os.path.join(last_save_dir, default_name + '.txt'),
-                "Text files (*.txt)"))
-        else:
-            file_name = scenario_file_path
-
-        relative_exposure_path, relative_hazard_path = \
-            self.scenario_layer_paths(
-                exposure_path, hazard_path, file_name)
-        #  write to file
-        parser = ConfigParser()
-        parser.add_section(title)
-        parser.set(title, 'exposure', relative_exposure_path)
-        parser.set(title, 'hazard', relative_hazard_path)
-        parser.set(title, 'function', function_id)
-        parser.set(title, 'extent', extent_string)
-
-        if aggregation_layer is not None:
-            aggregation_path = str(aggregation_layer.publicSource())
-            relative_aggregation_path = os.path.relpath(
-                aggregation_path, file_name)
-            parser.set(title, 'aggregation', relative_aggregation_path)
-
-        if file_name is None or file_name == '':
-            return
-
-        try:
-            parser.write(open(file_name, 'at'))
-            # Save directory settings
-            last_save_dir = os.path.dirname(file_name)
-            settings.setValue('inasafe/lastSourceDir', last_save_dir)
-        except IOError:
-            # noinspection PyTypeChecker,PyCallByClass
-            QtGui.QMessageBox.warning(
-                self, self.tr('InaSAFE'),
-                self.tr('Failed to save scenario to ' + file_name))

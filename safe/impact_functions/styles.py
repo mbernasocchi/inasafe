@@ -138,7 +138,7 @@ def categorical_style(target_field,
                 hsv[0] * 360,
                 data_defined_saturation_field,
                 max_impact_value,
-                hsv[2]*100)
+                hsv[2] * 100)
             style_class.update({'data_defined': {'color': expr}})
         classes.append(style_class)
 
@@ -167,6 +167,7 @@ def generate_categorical_color_ramp(class_count,
 
     :returns: a dict of list containing the HSV, RGB and HEX representation
         of the color ramp. some thing like this:
+
         {'hsv': [(1.0, 0.5, 0.7),
                 (0.8, 0.5, 0.7),
                 (0.6, 0.5, 0.7),
@@ -182,6 +183,7 @@ def generate_categorical_color_ramp(class_count,
                 '#597cb2',
                 '#59b27c',
                 '#a0b259']}
+
     :rtype: dict
     """
 

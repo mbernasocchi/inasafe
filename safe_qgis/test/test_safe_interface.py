@@ -21,10 +21,10 @@ import os
 import numpy
 import unittest
 from safe_qgis.safe_interface import (
-    getOptimalExtent,
-    availableFunctions,
+    get_optimal_extent,
+    available_functions,
     read_file_keywords,
-    readSafeLayer,
+    read_safe_layer,
     TESTDATA, HAZDATA, EXPDATA,
     BoundingBoxError)
 from safe_qgis.exceptions import (
@@ -71,8 +71,8 @@ class SafeInterfaceTest(unittest.TestCase):
                                        0.0083333333333333003)}
 
         # Verify relevant metada is ok
-        H = readSafeLayer(hazard_path)
-        E = readSafeLayer(exposure_path)
+        H = read_safe_layer(hazard_path)
+        E = read_safe_layer(exposure_path)
 
         hazard_bbox = H.get_bounding_box()
         assert numpy.allclose(hazard_bbox, haz_metadata['bounding_box'],
@@ -94,24 +94,24 @@ class SafeInterfaceTest(unittest.TestCase):
         ref_box = [105.3000035, -8.3749995, 110.2914705, -5.5667785]
         view_port = [94.972335, -11.009721, 141.014002, 6.073612]
 
-        bbox = getOptimalExtent(hazard_bbox, exposure_bbox, view_port)
+        bbox = get_optimal_extent(hazard_bbox, exposure_bbox, view_port)
         assert numpy.allclose(bbox, ref_box, rtol=1.0e-12, atol=1.0e-12)
 
         #testing with viewport clipping disabled
-        bbox = getOptimalExtent(hazard_bbox, exposure_bbox, None)
+        bbox = get_optimal_extent(hazard_bbox, exposure_bbox, None)
         assert numpy.allclose(bbox, ref_box, rtol=1.0e-12, atol=1.0e-12)
 
         view_port = [105.3000035,
                      -8.3749994999999995,
                      110.2914705,
                      -5.5667784999999999]
-        bbox = getOptimalExtent(hazard_bbox, exposure_bbox, view_port)
+        bbox = get_optimal_extent(hazard_bbox, exposure_bbox, view_port)
         assert numpy.allclose(bbox, ref_box,
                               rtol=1.0e-12, atol=1.0e-12)
 
         # Very small viewport fully inside other layers
         view_port = [106.0, -6.0, 108.0, -5.8]
-        bbox = getOptimalExtent(hazard_bbox, exposure_bbox, view_port)
+        bbox = get_optimal_extent(hazard_bbox, exposure_bbox, view_port)
 
         assert numpy.allclose(bbox, view_port,
                               rtol=1.0e-12, atol=1.0e-12)
@@ -120,82 +120,82 @@ class SafeInterfaceTest(unittest.TestCase):
         view_port = [107.0, -6.0, 112.0, -3.0]
         ref_box = [107, -6, 110.2914705, -5.5667785]
 
-        bbox = getOptimalExtent(hazard_bbox, exposure_bbox, view_port)
+        bbox = get_optimal_extent(hazard_bbox, exposure_bbox, view_port)
         assert numpy.allclose(bbox, ref_box,
                               rtol=1.0e-12, atol=1.0e-12)
 
         # Then one where boxes don't overlap
         view_port = [105.3, -4.3, 110.29, -2.5]
         try:
-            getOptimalExtent(hazard_bbox, exposure_bbox, view_port)
+            get_optimal_extent(hazard_bbox, exposure_bbox, view_port)
         except InsufficientOverlapError, e:
-            myMessage = 'Did not find expected error message in %s' % str(e)
-            assert 'did not overlap' in str(e), myMessage
+            message = 'Did not find expected error message in %s' % str(e)
+            assert 'did not overlap' in str(e), message
         else:
-            myMessage = ('Non ovelapping bounding boxes should have raised '
+            message = ('Non ovelapping bounding boxes should have raised '
                          'an exception')
-            raise Exception(myMessage)
+            raise Exception(message)
 
         # Try with wrong input data
         try:
-            getOptimalExtent(haz_metadata, exp_metadata, view_port)
+            get_optimal_extent(haz_metadata, exp_metadata, view_port)
         except BoundingBoxError:
             #good this was expected
             pass
         except InsufficientOverlapError, e:
-            myMessage = 'Did not find expected error message in %s' % str(e)
-            assert 'Invalid' in str(e), myMessage
+            message = 'Did not find expected error message in %s' % str(e)
+            assert 'Invalid' in str(e), message
         else:
-            myMessage = 'Wrong input data should have raised an exception'
-            raise Exception(myMessage)
+            message = 'Wrong input data should have raised an exception'
+            raise Exception(message)
 
         try:
-            getOptimalExtent(None, None, view_port)
+            get_optimal_extent(None, None, view_port)
         except BoundingBoxError, e:
-            myMessage = 'Did not find expected error message in %s' % str(e)
-            assert 'cannot be None' in str(e), myMessage
+            message = 'Did not find expected error message in %s' % str(e)
+            assert 'cannot be None' in str(e), message
         else:
-            myMessage = 'Wrong input data should have raised an exception'
-            raise Exception(myMessage)
+            message = 'Wrong input data should have raised an exception'
+            raise Exception(message)
 
         try:
-            getOptimalExtent('aoeush', 'oeuuoe', view_port)
+            get_optimal_extent('aoeush', 'oeuuoe', view_port)
         except BoundingBoxError, e:
-            myMessage = 'Did not find expected error message in %s' % str(e)
-            assert 'Instead i got "aoeush"' in str(e), myMessage
+            message = 'Did not find expected error message in %s' % str(e)
+            assert 'Instead i got "aoeush"' in str(e), message
         else:
-            myMessage = 'Wrong input data should have raised an exception'
-            raise Exception(myMessage)
+            message = 'Wrong input data should have raised an exception'
+            raise Exception(message)
 
     def test_availableFunctions(self):
         """Check we can get the available functions from the impact calculator.
         """
-        myList = availableFunctions()
-        myMessage = 'No functions available (len=%ss)' % len(myList)
-        assert len(myList) > 0, myMessage
+        myList = available_functions()
+        message = 'No functions available (len=%ss)' % len(myList)
+        assert len(myList) > 0, message
 
         # Also test if it works when we give it two layers
         # to see if we can determine which functions will
         # work for them.
-        myKeywords1 = read_file_keywords(self.rasterShakePath)
-        myKeywords2 = read_file_keywords(self.vectorPath)
+        keywords1 = read_file_keywords(self.rasterShakePath)
+        keywords2 = read_file_keywords(self.vectorPath)
         # We need to explicitly add the layer type to each keyword list
-        myKeywords1['layertype'] = 'raster'
-        myKeywords2['layertype'] = 'vector'
+        keywords1['layertype'] = 'raster'
+        keywords2['layertype'] = 'vector'
 
-        myList = [myKeywords1, myKeywords2]
-        myList = availableFunctions(myList)
-        myMessage = 'No functions available (len=%ss)' % len(myList)
-        assert len(myList) > 0, myMessage
+        myList = [keywords1, keywords2]
+        myList = available_functions(myList)
+        message = 'No functions available (len=%ss)' % len(myList)
+        assert len(myList) > 0, message
 
     def test_getKeywordFromFile(self):
         """Get keyword from a filesystem file's .keyword file."""
 
-        myKeyword = read_file_keywords(self.rasterShakePath, 'category')
-        myExpectedKeyword = 'hazard'
-        myMessage = 'Got: %s\n\nExpected %s\n\nDB: %s' % (
-                    myKeyword, myExpectedKeyword, self.rasterShakePath)
-        assert myKeyword == 'hazard', myMessage
+        keyword = read_file_keywords(self.rasterShakePath, 'category')
+        expected_keyword = 'hazard'
+        message = 'Got: %s\n\nExpected %s\n\nDB: %s' % (
+                    keyword, expected_keyword, self.rasterShakePath)
+        assert keyword == 'hazard', message
 
         # Test we get an exception if keyword is not found
         try:
@@ -204,59 +204,59 @@ class SafeInterfaceTest(unittest.TestCase):
         except KeywordNotFoundError:
             pass  # this is good
         except Exception, e:
-            myMessage = ('Request for bogus keyword raised incorrect '
+            message = ('Request for bogus keyword raised incorrect '
                          'exception type: \n %s') % str(e)
-            assert(), myMessage
+            assert(), message
 
-        myKeywords = read_file_keywords(self.rasterShakePath)
+        keywords = read_file_keywords(self.rasterShakePath)
 
-        myExpectedKeywords = {'category': 'hazard',
+        expected_keywords = {'category': 'hazard',
                               'subcategory': 'earthquake',
                               'source': 'USGS',
                               'unit': 'MMI',
                               'title': 'An earthquake in Padang like in 2009'}
-        myMessage = 'Expected:\n%s\nGot:\n%s\n' % (myExpectedKeywords,
-                                                   myKeywords)
-        assert myKeywords == myExpectedKeywords, myMessage
+        message = 'Expected:\n%s\nGot:\n%s\n' % (expected_keywords,
+                                                   keywords)
+        assert keywords == expected_keywords, message
 
-        myKeywords = read_file_keywords(self.rasterPopulationPath)
-        myExpectedKeywords = {'category': 'exposure',
+        keywords = read_file_keywords(self.rasterPopulationPath)
+        expected_keywords = {'category': 'exposure',
                               'source': ('Center for International Earth '
                                          'Science Information Network '
                                          '(CIESIN)'),
                               'subcategory': 'population',
                               'datatype': 'density',
                               'title': 'People'}
-        myMessage = 'Expected:\n%s\nGot:\n%s\n' % (myExpectedKeywords,
-                                                   myKeywords)
-        assert myKeywords == myExpectedKeywords, myMessage
+        message = 'Expected:\n%s\nGot:\n%s\n' % (expected_keywords,
+                                                   keywords)
+        assert keywords == expected_keywords, message
 
-        myKeywords = read_file_keywords(self.vectorPath)
-        myExpectedKeywords = {'category': 'exposure',
+        keywords = read_file_keywords(self.vectorPath)
+        expected_keywords = {'category': 'exposure',
                               'datatype': 'itb',
                               'subcategory': 'structure',
                               'title': 'Padang WGS84'}
-        myMessage = 'Expected:\n%s\nGot:\n%s\n' % (myExpectedKeywords,
-                                                   myKeywords)
-        assert myKeywords == myExpectedKeywords, myMessage
+        message = 'Expected:\n%s\nGot:\n%s\n' % (expected_keywords,
+                                                   keywords)
+        assert keywords == expected_keywords, message
 
         #  tsunami example (one layer is UTM)
-        myKeywords = read_file_keywords(self.rasterTsunamiPath)
-        myExpectedKeywords = {'title': 'Tsunami Max Inundation',
+        keywords = read_file_keywords(self.rasterTsunamiPath)
+        expected_keywords = {'title': 'Tsunami Max Inundation',
                               'category': 'hazard',
                               'subcategory': 'tsunami',
                               'unit': 'm'}
-        myMessage = 'Expected:\n%s\nGot:\n%s\n' % (myExpectedKeywords,
-                                                   myKeywords)
-        assert myKeywords == myExpectedKeywords, myMessage
+        message = 'Expected:\n%s\nGot:\n%s\n' % (expected_keywords,
+                                                   keywords)
+        assert keywords == expected_keywords, message
 
-        myKeywords = read_file_keywords(self.rasterExposurePath)
-        myExpectedKeywords = {'category': 'exposure',
+        keywords = read_file_keywords(self.rasterExposurePath)
+        expected_keywords = {'category': 'exposure',
                               'subcategory': 'structure',
                               'title': 'Tsunami Building Exposure'}
-        myMessage = 'Expected:\n%s\nGot:\n%s\n' % (myExpectedKeywords,
-                                                   myKeywords)
-        assert myKeywords == myExpectedKeywords, myMessage
+        message = 'Expected:\n%s\nGot:\n%s\n' % (expected_keywords,
+                                                   keywords)
+        assert keywords == expected_keywords, message
 
 
 if __name__ == '__main__':

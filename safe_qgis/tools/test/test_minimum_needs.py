@@ -18,18 +18,24 @@ __date__ = '14/09/2012'
 __copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
                  'Disaster Reduction')
 
+# this import required to enable PyQt API v2 - DO NOT REMOVE!
+#noinspection PyUnresolvedReferences
+import qgis  # pylint: disable=W0611
+
 import unittest
 import os
 
 from qgis.core import QgsMapLayerRegistry
 
+from safe.common.testing import get_qgis_app
+# In our tests, we need to have this line below before importing any other
+# safe_qgis.__init__ to load all the configurations that we make for testing
+QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
+
 from safe_qgis.safe_interface import safe_read_layer
 from safe_qgis.tools.minimum_needs import MinimumNeeds
 from safe_qgis.safe_interface import UNITDATA
-from safe_qgis.utilities.utilities_for_testing import get_qgis_app
 
-
-QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
 shapefile_path = os.path.join(UNITDATA, 'other', 'minimum_needs.shp')
 result_path_base = os.path.join(UNITDATA, 'other', 'minimum_needs_perka7')
 
@@ -63,7 +69,7 @@ class MinimumNeedsTest(unittest.TestCase):
             'family_kits': 200,
             'rice': 2800,
             'toilets': 50,
-            'water': 105000}
+            'water': 67000}
         self.assertDictEqual(attributes, new_layer.data[0])
 
     # def Xtest_accept(self):
@@ -72,11 +78,11 @@ class MinimumNeedsTest(unittest.TestCase):
     #     TODO: Make this test useful - Tim
     #     """
     #     #print shapefile_path
-    #     myLayer = QgsVectorLayer(
+    #     layer = QgsVectorLayer(
     #         os.path.basename(shapefile_path),
     #         os.path.dirname(shapefile_path),
     #         'ogr')
-    #     myLayer = None
+    #     layer = None
     #     dialog = MinimumNeeds(PARENT)
     #     dialog.accept()
 

@@ -5,38 +5,48 @@ import os
 
 from osgeo import gdal
 
-from raster import Raster
-from vector import Vector
-from vector import convert_polygons_to_centroids
-from projection import Projection
-from projection import DEFAULT_PROJECTION
-from core import read_layer
-from core import write_raster_data
-from utilities import write_keywords
-from utilities import read_keywords
-from utilities import bbox_intersection
-from utilities import minimal_bounding_box
-from utilities import buffered_bounding_box
-from utilities import array_to_wkt
-from utilities import calculate_polygon_area
-from utilities import calculate_polygon_centroid
-from utilities import points_along_line
-from utilities import geotransform_to_bbox
-from utilities import geotransform_to_resolution
-from utilities import raster_geometry_to_geotransform
-from core import get_bounding_box
-from core import bboxlist2string, bboxstring2list
-from core import check_bbox_string
-from utilities_test import same_API
-from geometry import Polygon
+from safe.storage.raster import Raster
+from safe.storage.vector import (
+    Vector,
+    convert_polygons_to_centroids)
+from safe.storage.projection import (
+    Projection, DEFAULT_PROJECTION)
+from safe.storage.utilities import (
+    write_keywords,
+    read_keywords,
+    bbox_intersection,
+    minimal_bounding_box,
+    buffered_bounding_box,
+    array_to_wkt,
+    calculate_polygon_area,
+    calculate_polygon_centroid,
+    points_along_line,
+    geotransform_to_bbox,
+    geotransform_to_resolution,
+    raster_geometry_to_geotransform)
+from safe.storage.core import (
+    read_layer,
+    write_raster_data,
+    get_bounding_box,
+    bboxlist2string,
+    bboxstring2list,
+    check_bbox_string)
+from safe.storage.utilities_test import same_API
+from safe.storage.geometry import Polygon
 from safe.common.numerics import nan_allclose
-from safe.common.testing import TESTDATA, HAZDATA, DATADIR
-from safe.common.testing import FEATURE_COUNTS
-from safe.common.testing import GEOTRANSFORMS
+from safe.common.testing import (
+    TESTDATA,
+    HAZDATA,
+    DATADIR,
+    FEATURE_COUNTS,
+    GEOTRANSFORMS)
 from safe.common.utilities import ugettext as tr, unique_filename
 from safe.common.polygon import is_inside_polygon
-from safe.common.exceptions import BoundingBoxError, ReadLayerError
-from safe.common.exceptions import VerificationError, InaSAFEError
+from safe.common.exceptions import (
+    BoundingBoxError,
+    ReadLayerError,
+    VerificationError,
+    InaSAFEError)
 
 
 # Auxiliary function for raster test
@@ -744,9 +754,6 @@ class Test_IO(unittest.TestCase):
 
         V_tmp = read_layer(tmp_filename)
 
-        #print V_new.get_data()[1]
-        #print V_tmp.get_data()[1]
-
         assert V_tmp.projection == V_new.projection
         assert numpy.allclose(V_tmp.geometry, V_new.geometry)
         assert V_tmp.data == V_new.data
@@ -918,7 +925,7 @@ class Test_IO(unittest.TestCase):
     test_centroids_from_polygon_data.slow = True
 
     def test_rasters_and_arrays(self):
-        """Consistency of rasters and associated arrays
+        """Consistency of rasters and associated arrays.
         """
 
         # Create test data
@@ -1052,7 +1059,7 @@ class Test_IO(unittest.TestCase):
         try:
             R1.projection == 234
         except TypeError:
-            pass
+            print 'You can ignore the ERROR 1 message it is intentional - Tim'
         else:
             msg = 'Should have raised TypeError'
             raise Exception(msg)
@@ -1171,7 +1178,9 @@ class Test_IO(unittest.TestCase):
 
             # Test conversion between geotransform and
             # geometry (longitudes and latitudes)
+            # pylint: disable=W0633,W0632
             longitudes, latitudes = R1.get_geometry()
+            # pylint: enable=W0633,W0632
             gt = raster_geometry_to_geotransform(longitudes, latitudes)
             msg = ('Conversion from coordinates to geotransform failed: %s'
                    % str(gt))
@@ -1305,25 +1314,6 @@ class Test_IO(unittest.TestCase):
                                       'Earthquake_Ground_Shaking.asc')]:
 
             R = read_layer(filename)
-            A = R.get_data(nan=False)
-
-            # Verify nodata value
-            Amin = min(A.flat[:])
-            msg = ('Raster must have -9999 as its minimum for this test. '
-                   'We got %f for file %s' % (Amin, filename))
-            assert Amin == -9999, msg
-
-            # Verify that GDAL knows about this
-            nodata = R.get_nodata_value()
-            msg = ('File %s should have registered nodata '
-                   'value %i but it was %s' % (filename, Amin, nodata))
-            assert nodata == Amin, msg
-
-            if filename.endswith('Earthquake_Ground_Shaking.asc'):
-                # Slow
-                continue
-
-            # Then try using numpy.nan
             A = R.get_data(nan=True)
 
             # Verify nodata value
@@ -1427,7 +1417,7 @@ class Test_IO(unittest.TestCase):
             assert numpy.nanmax(numpy.abs(A - B)) == 0
 
             # Check that extrema are OK
-            assert numpy.allclose(maximum, numpy.max(A[:]))
+            assert numpy.allclose(maximum, numpy.nanmax(A[:]))
             assert numpy.allclose(maximum, numpy.nanmax(B[:]))
             assert numpy.allclose(minimum, numpy.nanmin(B[:]))
 
@@ -1506,7 +1496,7 @@ class Test_IO(unittest.TestCase):
 
         # Check data directly
         coordinates, values = R.to_vector_points()
-        longitudes, latitudes = R.get_geometry()
+        longitudes, latitudes = R.get_geometry()  # pylint: disable=W0633,W0632
         A = R.get_data()
         M, N = A.shape
         L = M * N
@@ -1526,7 +1516,6 @@ class Test_IO(unittest.TestCase):
         # Store it for visual inspection e.g. with QGIS
         #out_filename = unique_filename(suffix='.shp')
         #V.write_to_file(out_filename)
-        #print 'Written to ', out_filename
 
         # Check against cells that were verified manually using QGIS
         assert numpy.allclose(geometry[5], [96.97137053, -5.34965715])
@@ -1556,7 +1545,7 @@ class Test_IO(unittest.TestCase):
 
         # Check data directly
         coordinates, values = R.to_vector_points()
-        longitudes, latitudes = R.get_geometry()
+        longitudes, latitudes = R.get_geometry()  # pylint: disable=W0633,W0632
         A = R.get_data()
         M, N = A.shape
         L = M * N
@@ -1573,7 +1562,6 @@ class Test_IO(unittest.TestCase):
         # Store it for visual inspection e.g. with QGIS
         #out_filename = unique_filename(suffix='.shp')
         #V.write_to_file(out_filename)
-        #print 'Written to ', out_filename
 
         # Systematic check of all cells
         i = 0
@@ -1729,7 +1717,10 @@ class Test_IO(unittest.TestCase):
                    'get_geometry_type',
                    'get_geometry_name',
                    'to_vector_points',
-                   'to_vector_layer']
+                   'to_vector_layer',
+                   'as_qgis_native',  # added in InaSAFE 2.0
+                   'read_from_qgis_native'  # added in InaSAFE 2.0
+                   ]
 
         V = Vector()  # Empty vector instance
         R = Raster()  # Empty raster instance

@@ -1,3 +1,4 @@
+# coding=utf-8
 """
 InaSAFE Disaster risk assessment tool developed by AusAid and World Bank
 - **Import Dialog Test Cases.**
@@ -15,6 +16,10 @@ __date__ = '05/02/2013'
 __copyright__ = ('Copyright 2013, Australia Indonesia Facility for '
                  'Disaster Reduction')
 
+# this import required to enable PyQt API v2 - DO NOT REMOVE!
+#noinspection PyUnresolvedReferences
+import qgis  # pylint: disable=W0611
+
 import unittest
 import logging
 
@@ -22,16 +27,20 @@ import os
 import tempfile
 import shutil
 
-from PyQt4.QtCore import QUrl, QObject, pyqtSignal, QVariant
-from PyQt4.QtGui import (QDialog)
-from PyQt4.QtNetwork import (QNetworkAccessManager, QNetworkReply)
-from safe_qgis.tools.osm_downloader import OsmDownloader
-from safe_qgis.utilities.utilities import download_url
-from safe_qgis.utilities.utilities_for_testing import (
-    get_qgis_app,
-    assert_hash_for_file)
+#noinspection PyPackageRequirements
+from PyQt4.QtCore import QUrl, QObject, pyqtSignal, QVariant, QByteArray
+#noinspection PyPackageRequirements
+from PyQt4.QtGui import QDialog
+#noinspection PyPackageRequirements
+from PyQt4.QtNetwork import QNetworkReply
 
+from safe.common.testing import get_qgis_app
+# In our tests, we need to have this line below before importing any other
+# safe_qgis.__init__ to load all the configurations that we make for testing
 QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
+
+from safe_qgis.tools.osm_downloader import OsmDownloader
+
 LOGGER = logging.getLogger('InaSAFE')
 
 TEST_DATA_DIR = os.path.abspath(
@@ -39,8 +48,14 @@ TEST_DATA_DIR = os.path.abspath(
         os.path.dirname(__file__), '../../test/test_data/test_files'))
 
 
-class FakeQNetworkReply(QObject):
+class MockQNetworkReply(QObject):
+    """A mock network reply for testing.
+
+    :param parent:
+    :type parent:
+    """
     readyRead = pyqtSignal()
+    finished = pyqtSignal()
     downloadProgress = pyqtSignal('qint64', 'qint64')
 
     def __init__(self, parent=None):
@@ -49,6 +64,7 @@ class FakeQNetworkReply(QObject):
         self.content = ""
         self._url = ""
 
+    #noinspection PyDocstring,PyPep8Naming
     def isFinished(self):
         """ simulate download progress """
         self.progress += 1
@@ -56,69 +72,96 @@ class FakeQNetworkReply(QObject):
         self.readyRead.emit()
         # noinspection PyUnresolvedReferences
         self.downloadProgress.emit(self.progress, 4)
-        return self.progress >= 4
+        if self.progress >= 4:
+            #noinspection PyUnresolvedReferences
+            self.finished.emit()
+            return True
+        else:
+            return False
 
+    #noinspection PyDocstring,PyPep8Naming
     def readAll(self):
-        myContent = self.content
+        content = self.content
         self.content = ""
-        return myContent
+        return content
 
+    #noinspection PyDocstring,PyPep8Naming
+    def read(self, size):
+        content = self.content
+        self.content = ""
+        # content = string while the input parameter size in QByteArray
+        data = QByteArray(content)
+        data.chop(data.size() - size)
+        return str(data)
+
+    #noinspection PyDocstring,PyPep8Naming
     def url(self):
         return QUrl(self._url)
 
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
     def error(self):
         return QNetworkReply.NoError
 
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
+    def size(self):
+        data = QByteArray(self.content)
+        return data.size()
+
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
     # pylint: disable=W0613
-    def attribute(self, theAttribute):
+    def attribute(self):
         return QVariant()
         # pylint: enable=W0613
 
 
+#noinspection PyClassHasNoInit
 class FakeQNetworkAccessManager:
     """Mock network manager for testing."""
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
     # pylint: disable=W0613
-    def post(self, theRequest, theData=None):
+    def post(self, request_url, data=None):
         """Mock handler for post requests.
-        :param theRequest: Requested url.
-        :param theData: Payload data (ignored).
+        :param request_url: Requested url.
+        :param data: Payload data (ignored).
         """
-        _ = theData  # ignored
-        return self.request(theRequest)
+        _ = data  # ignored
+        return self.request(request_url)
 
     # pylint: enable=W0613
 
-    def get(self, theRequest):
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
+    def get(self, request_url):
         """Mock handler for a get request.
-        :param theRequest: Url being requested.
+        :param request_url: Url being requested.
         """
-        return self.request(theRequest)
+        return self.request(request_url)
 
-    def request(self, theRequest):
+    #noinspection PyDocstring,PyPep8Naming,PyMethodMayBeStatic
+    def request(self, request_url):
         """Mock handler for an http request.
-        :param theRequest: Url being requested.
+        :param request_url: Url being requested.
         """
-        myUrl = str(theRequest.url().toString())
-        myReply = FakeQNetworkReply()
+        url = str(request_url.url().toString())
+        reply = MockQNetworkReply()
 
-        print myUrl
+        print url
 
-        if myUrl == 'http://hot-export.geofabrik.de/newjob':
-            myReply.content = read_all('test-importdlg-newjob.html')
-        elif myUrl == 'http://hot-export.geofabrik.de/wizard_area':
-            myReply.content = read_all('test-importdlg-wizardarea.html')
-        elif myUrl == 'http://hot-export.geofabrik.de/tagupload':
-            myReply.content = read_all('test-importdlg-job.html')
-            myReply._url = 'http://hot-export.geofabrik.de/jobs/1990'
-        elif myUrl == 'http://hot-export.geofabrik.de/jobs/1990':
-            myReply.content = read_all('test-importdlg-job.html')
-        elif myUrl == ('http://osm.linfiniti.com/buildings-shp?'
-                       'bbox=20.389938354492188,-34.10782492987083'
-                       ',20.712661743164062,'
-                       '-34.008273470938335'):
-            myReply.content = read_all("test-importdlg-extractzip.zip")
+        if url == 'http://hot-export.geofabrik.de/newjob':
+            reply.content = read_all('test-importdlg-newjob.html')
+        elif url == 'http://hot-export.geofabrik.de/wizard_area':
+            reply.content = read_all('test-importdlg-wizardarea.html')
+        elif url == 'http://hot-export.geofabrik.de/tagupload':
+            reply.content = read_all('test-importdlg-job.html')
+            reply._url = 'http://hot-export.geofabrik.de/jobs/1990'
+        elif url == 'http://hot-export.geofabrik.de/jobs/1990':
+            reply.content = read_all('test-importdlg-job.html')
+        elif url == ('http://osm.linfiniti.com/buildings-shp?'
+                     'bbox=20.389938354492188,-34.10782492987083'
+                     ',20.712661743164062,'
+                     '-34.008273470938335&qgis_version=2&output_prefix='):
+            reply.content = read_all("test-importdlg-extractzip.zip")
 
-        return myReply
+        return reply
 
 
 def read_all(path):
@@ -129,112 +172,145 @@ def read_all(path):
     :returns: The file contents.
     :rtype: str
     """
-    myPath = os.path.join(TEST_DATA_DIR, path)
-    myHandle = open(myPath, 'r')
-    myContent = myHandle.read()
-    myHandle.close()
-    return myContent
+    path = os.path.join(TEST_DATA_DIR, path)
+    handle = open(path, 'r')
+    content = handle.read()
+    handle.close()
+    return content
 
 
 class ImportDialogTest(unittest.TestCase):
     """Test Import Dialog widget
     """
+    #noinspection PyPep8Naming
     def setUp(self):
         """Runs before each test."""
-        self.importDlg = OsmDownloader(PARENT, IFACE)
+        self.dialog = OsmDownloader(PARENT, IFACE)
 
         ## provide Fake QNetworkAccessManager for self.network_manager
-        self.importDlg.network_manager = FakeQNetworkAccessManager()
+        self.dialog.network_manager = FakeQNetworkAccessManager()
 
-    def test_download_url(self):
-        """Test we can download a zip. Uses a mock network stack."""
-        myManager = QNetworkAccessManager(PARENT)
+    def test_validate_extent(self):
+        """Test validate extent method."""
+        # Normal case
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.min_latitude.setText('-34.10782492987083')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.assertTrue(self.dialog.validate_extent())
 
-        # NOTE(gigih):
-        # this is the hash of google front page.
-        # I think we can safely assume that the content
-        # of google.com never changes (probably).
-        #
-        myHash = 'd4b691cd9d99117b2ea34586d3e7eeb8'
-        myUrl = 'http://google.com'
-        myTempFilePath = tempfile.mktemp()
+        # min_latitude >= max_latitude
+        self.dialog.min_latitude.setText('34.10782492987083')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.assertFalse(self.dialog.validate_extent())
 
-        download_url(myManager, myUrl, myTempFilePath)
+        # min_longitude >= max_longitude
+        self.dialog.min_latitude.setText('-34.10782492987083')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.min_longitude.setText('34.10782492987083')
+        self.dialog.max_longitude.setText('-34.008273470938335')
+        self.assertFalse(self.dialog.validate_extent())
 
-        assert_hash_for_file(myHash, myTempFilePath)
+        # min_latitude < -90 or > 90
+        self.dialog.min_latitude.setText('-134.10782492987083')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.assertFalse(self.dialog.validate_extent())
+
+        # max_latitude < -90 or > 90
+        self.dialog.min_latitude.setText('-9.10782492987083')
+        self.dialog.max_latitude.setText('91.10782492987083')
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.assertFalse(self.dialog.validate_extent())
+
+        # min_longitude < -180 or > 180
+        self.dialog.min_latitude.setText('-34.10782492987083')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.min_longitude.setText('-184.10782492987083')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.assertFalse(self.dialog.validate_extent())
+
+        # max_longitude < -180 or > 180
+        self.dialog.min_latitude.setText('-34.10782492987083')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.max_longitude.setText('180.712661743164062')
+        self.assertFalse(self.dialog.validate_extent())
 
     def test_fetch_zip(self):
         """Test fetch zip method."""
-        myUrl = 'http://osm.linfiniti.com/buildings-shp?' + \
-                'bbox=20.389938354492188,-34.10782492987083' \
-                ',20.712661743164062,' + \
-                '-34.008273470938335&obj=building'
-        myTempFilePath = tempfile.mktemp('shapefiles')
-        self.importDlg.fetch_zip(myUrl, myTempFilePath)
+        url = (
+            'http://osm.linfiniti.com/buildings-shp?'
+            'bbox=20.389938354492188,-34.10782492987083'
+            ',20.712661743164062,'
+            '-34.008273470938335&obj=building')
+        path = tempfile.mktemp('shapefiles')
+        self.dialog.fetch_zip(url, path)
 
-        myMessage = "file %s not exist" % myTempFilePath
-        assert os.path.exists(myTempFilePath), myMessage
+        message = "file %s not exist" % path
+        assert os.path.exists(path), message
 
         # cleanup
-        os.remove(myTempFilePath)
+        os.remove(path)
 
     def test_extract_zip(self):
         """Test extract_zip method."""
-        myOutDir = tempfile.mkdtemp()
-        myInput = os.path.abspath(os.path.join(
+        base_path = tempfile.mkdtemp()
+        zipfile = os.path.abspath(os.path.join(
             TEST_DATA_DIR, 'test-importdlg-extractzip.zip'))
-        self.importDlg.extract_zip(myInput, myOutDir)
+        self.dialog.extract_zip(zipfile, base_path)
 
-        myMessage = "file {0} not exist"
+        message = "file {0} not exist"
 
-        myFile = 'planet_osm_line.shp'
-        myPath = os.path.join(myOutDir, myFile)
-        assert os.path.exists(myPath), myMessage.format(myFile)
+        file_name = 'planet_osm_line.shp'
+        path = os.path.join(base_path, file_name)
+        assert os.path.exists(path), message.format(file_name)
 
-        myFile = 'planet_osm_point.shp'
-        myPath = os.path.join(myOutDir, myFile)
-        assert os.path.exists(myPath), myMessage.format(myFile)
+        file_name = 'planet_osm_point.shp'
+        path = os.path.join(base_path, file_name)
+        assert os.path.exists(path), message.format(file_name)
 
-        myFile = 'planet_osm_polygon.shp'
-        myPath = os.path.join(myOutDir, myFile)
-        assert os.path.exists(myPath), myMessage.format(myFile)
+        file_name = 'planet_osm_polygon.shp'
+        path = os.path.join(base_path, file_name)
+        assert os.path.exists(path), message.format(file_name)
 
         # remove temporary folder and all of its content
-        shutil.rmtree(myOutDir)
+        shutil.rmtree(base_path)
 
     def test_download(self):
         """Test download method."""
-        myOutDir = tempfile.mkdtemp()
-        self.importDlg.outDir.setText(myOutDir)
-        self.importDlg.minLongitude.setText('20.389938354492188')
-        self.importDlg.minLatitude.setText('-34.10782492987083')
-        self.importDlg.maxLongitude.setText('20.712661743164062')
-        self.importDlg.maxLatitude.setText('-34.008273470938335')
-        self.importDlg.download()
+        output_directory = tempfile.mkdtemp()
+        self.dialog.output_directory.setText(output_directory)
+        self.dialog.min_longitude.setText('20.389938354492188')
+        self.dialog.min_latitude.setText('-34.10782492987083')
+        self.dialog.max_longitude.setText('20.712661743164062')
+        self.dialog.max_latitude.setText('-34.008273470938335')
+        self.dialog.download('buildings')
 
-        myResult = self.importDlg.progressDialog.result()
-        myMessage = "result do not match. current result is %s " % myResult
-        assert myResult == QDialog.Accepted, myMessage
+        result = self.dialog.progress_dialog.result()
+        message = "result do not match. current result is %s " % result
+        assert result == QDialog.Accepted, message
 
     def test_load_shapefile(self):
         """Test loading shape file to QGIS Main Window """
 
-        myInput = os.path.abspath(os.path.join(
+        zip_path = os.path.abspath(os.path.join(
             TEST_DATA_DIR, 'test-importdlg-extractzip.zip'))
-        myOutDir = tempfile.mkdtemp()
+        output_path = tempfile.mkdtemp()
 
-        self.importDlg.extract_zip(myInput, myOutDir)
+        self.dialog.extract_zip(zip_path, output_path)
 
-        # outDir must be set to myOutDir because loadShapeFile() use
+        # outDir must be set to output_path because loadShapeFile() use
         # that variable to determine the location of shape files.
-        self.importDlg.outDir.setText(myOutDir)
+        self.dialog.output_directory.setText(output_path)
 
-        self.importDlg.load_shapefile()
+        self.dialog.load_shapefile('buildings')
 
-        #FIXME(gigih): need to check if layer is loaded to QGIS
-
-        # remove temporary folder and all of its content
-        shutil.rmtree(myOutDir)
+        shutil.rmtree(output_path)
 
 
 if __name__ == '__main__':

@@ -6,22 +6,21 @@ import sys
 from glob import glob
 #noinspection PyPep8Naming
 import cPickle as pickle
-import logging
 
 
 def create_index(shakemap_dir, locale):
     """Pass dictionary from pickle to index.html.
 
     :param shakemap_dir: Directory containing pickle shakemap metadata. For
-    real use based on current environment, this would be a published directory
-    either public/en or public/id.
+     real use based on current environment, this would be a published directory
+     either public/en or public/id.
     :type shakemap_dir: str
-
-    :returns: Path to index file.
-    :rtype: str
 
     :param locale: Language of output index.html. id = Bahasa, en = English
     :type locale: str
+
+    :return: Path to index file.
+    :rtype: str
     """
     registered_locales = ['en', 'id']
     clean_locale = locale.lower()
@@ -65,13 +64,14 @@ def create_index(shakemap_dir, locale):
     footer_html_file.close()
 
     # Generate Table HTML for all of the pickle_path
-    table_html = ('\t<table class="table">\n'
+    table_html = ('\t<table class="table" id="earthquake_table">\n'
                   '\t\t<thead>'
                   '\n\t\t\t<tr>'
                   '\n\t\t\t\t<th>Max MMI</th>'
-                  '\n\t\t\t\t<th>Time</th>'
+                  '\n\t\t\t\t<th>Date and Time</th>'
                   '\n\t\t\t\t<th>Location</th>'
                   '\n\t\t\t\t<th>Magnitude</th>'
+                  '\n\t\t\t\t<th>Depth</th>'
                   '\n\t\t\t\t<th>Report Detail</th>'
                   '\n\t\t\t</tr>'
                   '\n\t\t</thead>'
@@ -80,6 +80,7 @@ def create_index(shakemap_dir, locale):
     for pickle_path in path_list:
         pickle_file = file(pickle_path, 'rb')
         metadata = pickle.load(pickle_file)
+        print metadata
         pickle_filename = os.path.basename(pickle_path)
         report_path = pickle_filename.split('-')[0] + '-' + locale
         report_path_pdf_link = '<a href="%s">%s</a>' % (report_path + '.pdf',
@@ -93,6 +94,7 @@ def create_index(shakemap_dir, locale):
             '\n\t\t\t\t<td>%s</td>'
             '\n\t\t\t\t<td><p class="location-info"><em>%s</em></p>%s</td>'
             '\n\t\t\t\t<td><div class="center">%s</div></td>'
+            '\n\t\t\t\t<td><div class="center">%s %s</div></td>'
             '\n\t\t\t\t<td>%s | %s</td>'
             '\n\t\t\t</tr>\n' % (
                 mmi_class,
@@ -101,13 +103,15 @@ def create_index(shakemap_dir, locale):
                 format(metadata['location-info']).encode('utf-8'),
                 metadata['place-name'].upper(),
                 metadata['mmi'],
+                metadata['depth-value'],
+                format(metadata['depth-unit']).encode('utf-8'),
                 report_path_pdf_link,
                 report_path_png_link))
 
     table_html += ('\t\t</tbody>'
                    '\n\t</table>')
 
-    index_file = file(index_path, 'wt')
+    index_file = file(index_path, 'w')
     index_file.write(header_html + table_html + footer_html)
     index_file.close()
     return index_path
@@ -118,13 +122,13 @@ def generate_pages(shakemap_dir_en, shakemap_dir_id):
     them.
 
     :param shakemap_dir_en: Shakemap directory for en locale where pickles are
-    located. For real use based on current environment, this would be a
-    published directory public/en
+     located. For real use based on current environment, this would be a
+     published directory public/en
     :type shakemap_dir_en: str
 
     :param shakemap_dir_id: Shakemap directory for id locale where pickles are
-    located. For real use based on current environment, this would be a
-    published directory public/id
+     located. For real use based on current environment, this would be a
+     published directory public/id
     :type shakemap_dir_id: str
 
     :returns: en_index_path, id_index_path

@@ -24,10 +24,9 @@ import traceback
 import sys
 import logging
 
-from PyQt4.QtCore import (QObject,
-                          pyqtSignal)
+from PyQt4.QtCore import QObject, pyqtSignal
 
-from safe_qgis.safe_interface import calculateSafeImpact
+from safe_qgis.safe_interface import calculate_safe_impact
 from safe_qgis.exceptions import InsufficientParametersError
 
 LOGGER = logging.getLogger('InaSAFE')
@@ -71,7 +70,12 @@ class ImpactCalculatorThread(threading.Thread, QObject):
         """For testing only"""
         print 'hello'
 
-    def __init__(self, hazard_layer, exposure_layer, function):
+    def __init__(self,
+                 hazard_layer,
+                 exposure_layer,
+                 function,
+                 extent=None,
+                 check_integrity=True):
         """Constructor for the impact calculator thread.
 
         :param hazard_layer: read_layer object containing the Hazard.
@@ -85,6 +89,15 @@ class ImpactCalculatorThread(threading.Thread, QObject):
             will be computed.
         :type function: FunctionProvider
 
+        :param extent: Bounding box [xmin, ymin, xmax, ymax]
+            of the working region.
+        :type extent: list
+
+        :param check_integrity:     If true, perform checking of
+                                    input data integrity before running
+                                    impact calculation
+        :type check_integrity:      Bool
+
         :raises: InsufficientParametersError if not all parameters are set.
         """
         threading.Thread.__init__(self)
@@ -92,10 +105,12 @@ class ImpactCalculatorThread(threading.Thread, QObject):
         self._hazardLayer = hazard_layer
         self._exposureLayer = exposure_layer
         self._function = function
+        self._extent = extent
         self._impactLayer = None
         self._result = None
         self._exception = None
         self._traceback = None
+        self._check_integrity = check_integrity
 
     def impact_layer(self):
         """Get the impact output from the last run.
@@ -113,7 +128,7 @@ class ImpactCalculatorThread(threading.Thread, QObject):
         """
         return self._result
 
-    def lastException(self):
+    def last_exception(self):
         """Get any exception that may have been raised while running.
 
         :returns: An exception if any.
@@ -141,15 +156,15 @@ class ImpactCalculatorThread(threading.Thread, QObject):
 
           calculator = ImpactCalculator()
           rasterPath = os.path.join(TESTDATA, 'xxx.asc')
-          vectorPath = os.path.join(TESTDATA, 'xxx.shp')
+          vector_path = os.path.join(TESTDATA, 'xxx.shp')
           calculator.setHazardLayer(self.rasterPath)
-          calculator.setExposureLayer(self.vectorPath)
+          calculator.setExposureLayer(self.vector_path)
           calculator.setFunction('Flood Building Impact Function')
           myRunner = calculator.getRunner()
           #wait till completion
           myRunner.join()
           myResult = myRunner.result()
-          myFilename = myRunner.filename()
+          filename = myRunner.filename()
 
 
         :raises: InsufficientParametersError
@@ -159,16 +174,18 @@ class ImpactCalculatorThread(threading.Thread, QObject):
         if (self._hazardLayer is None) or \
                 (self._exposureLayer is None) or \
                 (self._function is None):
-            myMessage = self.tr(
+            message = self.tr(
                 'Ensure that hazard, exposure and function are all set before '
                 'trying to run the analysis.')
-            raise InsufficientParametersError(myMessage)
+            raise InsufficientParametersError(message)
         try:
-            myLayers = [self._hazardLayer, self._exposureLayer]
-            self._impactLayer = calculateSafeImpact(
-                theLayers=myLayers, theFunction=self._function)
+            layers = [self._hazardLayer, self._exposureLayer]
+            self._impactLayer = calculate_safe_impact(
+                layers=layers, function=self._function,
+                extent=self._extent,
+                check_integrity=self._check_integrity)
         except MemoryError, e:
-            myMessage = self.tr(
+            message = self.tr(
                 'An error occurred because it appears that your system does '
                 'not have sufficient memory. Upgrading your computer so that '
                 'it has more memory may help. Alternatively, consider using a '
@@ -176,17 +193,17 @@ class ImpactCalculatorThread(threading.Thread, QObject):
                 'rasters with a larger cell size.')
             self._exception = e
             self._traceback = traceback.format_tb(sys.exc_info()[2])
-            self._result = myMessage
-            LOGGER.exception(myMessage)
+            self._result = message
+            LOGGER.exception(message)
         # Catch and handle all other exceptions:
         # pylint: disable=W0703
         except Exception, e:
-            myMessage = self.tr('Calculation error encountered:\n')
+            message = self.tr('Calculation error encountered:\n')
             #store the exception so that controller class can get it later
             self._exception = e
             self._traceback = traceback.format_tb(sys.exc_info()[2])
-            self._result = myMessage
-            LOGGER.exception(myMessage)
+            self._result = message
+            LOGGER.exception(message)
         else:
             self._result = self.tr('Calculation completed successfully.')
         # pylint: enable=W0703

@@ -10,7 +10,6 @@ Contact : ole.moller.nielsen@gmail.com
      (at your option) any later version.
 
 """
-
 __author__ = 'misugijunz@gmail.com'
 __date__ = '15/10/2012'
 __copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
@@ -20,7 +19,13 @@ import sys
 import os
 import logging
 
-from PyQt4.QtGui import QLineEdit
+# noinspection PyPackageRequirements
+from PyQt4.QtGui import QLineEdit, QCheckBox
+
+from safe.common.testing import get_qgis_app
+# In our tests, we need to have this line below before importing any other
+# safe_qgis.__init__ to load all the configurations that we make for testing
+QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
 
 # Add PARENT directory to path to make test aware of other modules
 pardir = os.path.abspath(
@@ -28,34 +33,17 @@ pardir = os.path.abspath(
 sys.path.append(pardir)
 
 from safe_qgis.safe_interface import get_plugins
-from third_party.odict import OrderedDict
+from collections import OrderedDict
 
 from safe_qgis.impact_statistics.function_options_dialog import (
     FunctionOptionsDialog)
-from safe_qgis.utilities.utilities_for_testing import get_qgis_app
-# pylint: disable=W0611
-# pylint: enable=W0611
 
-QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
 LOGGER = logging.getLogger('InaSAFE')
 
 
 class FunctionOptionsDialogTest(unittest.TestCase):
     """Test the InaSAFE GUI for Configurable Impact Functions"""
-
-    def setUp(self):
-        """Fixture run before all tests"""
-        pass
-
-    def tearUp(self):
-        """Fixture run before each test"""
-        pass
-
-    def tearDown(self):
-        """Fixture run after each test"""
-        pass
-
-    def test_buildForm(self):
+    def test_build_form(self):
         """Test that we can build a form by passing it a function and params.
         """
         # noinspection PyUnresolvedReferences
@@ -63,13 +51,13 @@ class FunctionOptionsDialogTest(unittest.TestCase):
         from safe.engine.impact_functions_for_testing import \
             itb_fatality_model_configurable
         # pylint: enable=W0612
-        myFunctionId = 'I T B Fatality Function Configurable'
-        myFunctionList = get_plugins(myFunctionId)
-        assert len(myFunctionList) == 1
-        assert myFunctionList[0].keys()[0] == myFunctionId
+        function_id = 'I T B Fatality Function Configurable'
+        function_list = get_plugins(function_id)
+        assert len(function_list) == 1
+        assert function_list[0].keys()[0] == function_id
 
-        myDialog = FunctionOptionsDialog(None)
-        myParameters = {
+        dialog = FunctionOptionsDialog(None)
+        parameter = {
             'thresholds': [1.0],
             'postprocessors': {
                 'Gender': {'on': True},
@@ -77,26 +65,37 @@ class FunctionOptionsDialogTest(unittest.TestCase):
                     'on': True,
                     'params': {
                         'youth_ratio': 0.263,
-                        'elder_ratio': 0.078,
-                        'adult_ratio': 0.659}}}}
+                        'elderly_ratio': 0.078,
+                        'adult_ratio': 0.659
+                    }
+                }
+            },
+            'minimum needs': {
+                'Rice': 2.8
+            }
+        }
 
-        myDialog.build_form(myParameters)
+        dialog.build_form(parameter)
 
-        assert myDialog.tabWidget.count() == 2
+        message = 'There should be %s tabwidget but got %s' % (
+            3, dialog.tabWidget.count())
+        self.assertEqual(dialog.tabWidget.count(), 3, message)
 
-        myChildren = myDialog.tabWidget.findChildren(QLineEdit)
-        assert len(myChildren) == 4
+        children = dialog.tabWidget.findChildren(QLineEdit)
+        message = 'There should be %s QLineEdit but got %s' % (
+            5, len(children))
+        self.assertEqual(len(children), 5, message)
 
-    def test_buildFormMinimumNeeds(self):
+    def test_build_form_minimum_needs(self):
         """Test that we can build a form by passing it a function and params.
         """
-        myFunctionId = 'Flood Evacuation Function Vector Hazard'
-        myFunctionList = get_plugins(myFunctionId)
-        assert len(myFunctionList) == 1
-        assert myFunctionList[0].keys()[0] == myFunctionId
+        function_id = 'Flood Evacuation Function Vector Hazard'
+        function_list = get_plugins(function_id)
+        assert len(function_list) == 1
+        assert function_list[0].keys()[0] == function_id
 
-        myDialog = FunctionOptionsDialog(None)
-        myParameters = {
+        dialog = FunctionOptionsDialog(None)
+        parameters = {
             'thresholds': [1.0],
             'postprocessors': {
                 'Gender': {'on': True},
@@ -104,42 +103,84 @@ class FunctionOptionsDialogTest(unittest.TestCase):
                     'on': True,
                     'params': {
                         'youth_ratio': 0.263,
-                        'elder_ratio': 0.078,
+                        'elderly_ratio': 0.078,
                         'adult_ratio': 0.659}}}}
 
-        myDialog.build_form(myParameters)
+        dialog.build_form(parameters)
 
-        assert myDialog.tabWidget.count() == 2
+        assert dialog.tabWidget.count() == 2
 
-        myChildren = myDialog.tabWidget.findChildren(QLineEdit)
-        assert len(myChildren) == 4
+        children = dialog.tabWidget.findChildren(QLineEdit)
+        assert len(children) == 4
 
-    def test_buildWidget(self):
-        myDialog = FunctionOptionsDialog(None)
-        myValue = myDialog.build_widget(myDialog.configLayout, 'foo', [2.3])
-        myWidget = myDialog.findChild(QLineEdit)
+    def test_build_widget(self):
+        dialog = FunctionOptionsDialog(None)
+        value = dialog.build_widget(dialog.configLayout, 'foo', [2.3])
+        widget = dialog.findChild(QLineEdit)
 
         # initial value must be same with default
-        assert myValue() == [2.3]
+        expected_value = [2.3]
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
 
         # change to 5.9
-        myWidget.setText('5.9')
-        assert myValue() == [5.9]
+        widget.setText('5.9')
+        expected_value = [5.9]
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
 
-        myWidget.setText('5.9, 70')
-        assert myValue() == [5.9, 70]
+        widget.setText('5.9, 70')
+        expected_value = [5.9, 70]
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
 
-        myWidget.setText('bar')
+        widget.setText('bar')
         try:
-            myValue()
+            value()
         except ValueError:
             ## expected to raises this exception
             pass
         else:
             raise Exception("Fail: must be raise an exception")
 
-    def test_parseInput(self):
-        myInput = {
+        dialog = FunctionOptionsDialog(None)
+        value = dialog.build_widget(dialog.configLayout, 'foo', True)
+        widget = dialog.findChild(QCheckBox)
+
+        # initial value must be same with default
+        expected_value = True
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
+
+        widget.setChecked(False)
+        expected_value = False
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
+
+        original_value = {'a': 1, 'b': 2}
+        dialog = FunctionOptionsDialog(None)
+        value = dialog.build_widget(dialog.configLayout, 'foo', original_value)
+        widget = dialog.findChild(QLineEdit)
+
+        # initial value must be same with default
+        expected_value = original_value
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
+
+        expected_value = {'a': 2, 'b': 1}
+        widget.setText(str(expected_value))
+        real_value = value()
+        message = 'Expected %s but got %s' % (expected_value, real_value)
+        self.assertEqual(expected_value, real_value, message)
+
+    def test_parse_input(self):
+        function_input = {
             'thresholds': lambda: [1.0],
             'postprocessors': {
                 'Gender': {'on': lambda: True},
@@ -147,22 +188,25 @@ class FunctionOptionsDialogTest(unittest.TestCase):
                     'on': lambda: True,
                     'params': {
                         'youth_ratio': lambda: 0.263,
-                        'elder_ratio': lambda: 0.078,
+                        'elderly_ratio': lambda: 0.078,
                         'adult_ratio': lambda: 0.659}}}}
 
-        myDialog = FunctionOptionsDialog(None)
-        myResult = myDialog.parse_input(myInput)
-        print myResult
-        assert myResult == OrderedDict([
+        dialog = FunctionOptionsDialog(None)
+        result = dialog.parse_input(function_input)
+        print result
+        expected = OrderedDict([
             ('thresholds', [1.0]),
             ('postprocessors', OrderedDict([
                 ('Gender', OrderedDict([('on', True)])),
                 ('Age', OrderedDict([
                     ('on', True),
                     ('params', OrderedDict([
+                        ('elderly_ratio', 0.078),
                         ('youth_ratio', 0.263),
-                        ('elder_ratio', 0.078),
                         ('adult_ratio', 0.659)]))]))]))])
+        # noinspection PyPep8Naming
+        self.maxDiff = None
+        self.assertDictEqual(result, expected)
 
 if __name__ == '__main__':
     suite = unittest.makeSuite(FunctionOptionsDialogTest, 'test')

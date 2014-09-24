@@ -11,13 +11,14 @@ import logging
 from math import ceil
 
 import numpy
-from third_party.odict import OrderedDict
+from safe.common.utilities import OrderedDict
 
 import keyword as python_keywords
 from safe.common.polygon import inside_polygon
 from safe.common.utilities import ugettext as tr
 from safe.common.tables import Table, TableCell, TableRow
 from utilities import pretty_string, remove_double_spaces
+from safe.metadata import converter_dict
 
 
 LOGGER = logging.getLogger('InaSAFE')
@@ -39,21 +40,23 @@ class PluginMount(type):
             # This must be a plugin implementation, which should be registered.
             # Simply appending it to the list is all that's needed to keep
             # track of it later.
+            if cls.__name__ in [c.__name__ for c in cls.plugins]:
+                raise LookupError(
+                    "Duplicate impact function name %s" % cls.__name__)
             cls.plugins.append(cls)
 # pylint: enable=W0613,C0203
 
 
-class FunctionProvider:
+class FunctionProvider(object):
     """Mount point for impact_functions.
 
     Plugins implementing this reference should provide the following method:
 
-    run(layers)
+    run(layers)::
 
-    ===============  =========================
-    layers           A list of layers
-    result           A list of layers
-    ===============  =========================
+      layers           A list of layers
+      result           A list of layers
+
     """
     __metaclass__ = PluginMount
 
@@ -66,29 +69,32 @@ def default_minimum_needs():
 
     .. note:: Key names will be translated.
     """
-    rice = tr(
-        'Rice')
-    drinking_water = tr('Drinking Water')
-    water = tr('Water')
-    family_kits = tr('Family Kits')
-    toilets = tr('Toilets')
+    rice = 'Rice'
+    drinking_water = 'Drinking Water'
+    water = 'Water'
+    family_kits = 'Family Kits'
+    toilets = 'Toilets'
     minimum_needs = OrderedDict([
         (rice, 2.8),
         (drinking_water, 17.5),
-        (water, 105),
+        (water, 67),
         (family_kits, 0.2),
         (toilets, 0.05)])
     return minimum_needs
 
 
-def evacuated_population_weekly_needs(population,
-                                      minimum_needs=False,
-                                      human_names=False):
+def evacuated_population_weekly_needs(
+        population,
+        minimum_needs=False,
+        human_names=False):
     """Calculate estimated needs using BNPB Perka 7/2008 minimum bantuan.
-
 
     :param population: The number of evacuated population.
     :type: int, float
+
+    :param human_names: A flag whether to use human names for minimum needs
+        items or not
+    :type human_names: bool
 
     :param minimum_needs: Ratios to use when calculating minimum needs.
         Defaults to perka 7 as described in assumptions below.
@@ -178,8 +184,8 @@ def get_plugins(name=None):
             dict([(p.__name__, p) for p in FunctionProvider.plugins]))
 
         msg = ('No plugin named "%s" was found. '
-               'List of available plugins is: %s'
-               % (name, ', '.join(plugins_dict.keys())))
+               'List of available plugins is: \n%s'
+               % (name, ',\n '.join(plugins_dict.keys())))
         if name not in plugins_dict:
             raise RuntimeError(msg)
 
@@ -562,7 +568,7 @@ def aggregate(data=None, boundaries=None,
     Output:
         Dictionary of {boundary_name: aggregated value}
     """
-
+    res = None
     if data.is_point_data:
         res = aggregate_point_data(data, boundaries,
                                    attribute_name, aggregation_function)
@@ -576,7 +582,6 @@ def aggregate(data=None, boundaries=None,
         msg = ('Input argument "data" must be point or raster data. '
                'I got type: %s' % data.get_geometry_type())
         raise Exception(msg)
-
     return res
 
 
@@ -610,6 +615,8 @@ def get_admissible_plugins(keywords=None):  # , name=None):
 
     if isinstance(keywords, dict):
         keywords = [keywords]
+
+    convert_to_old_keywords(converter_dict, keywords)
 
     # Get all impact functions
     plugin_dict = get_plugins()
@@ -905,3 +912,34 @@ def is_function_enabled(func):
         if dict_req.get('disabled', False):
             return False
     return True
+
+
+def convert_to_old_keywords(converter, keywords):
+    """Convert new keywords system to old keywords system by aliases.
+
+    Since we have new keywords system in metadata.py and assigned by wizard,
+    it will have backward incompatibility because the current impact function
+    selector still use the old system.
+
+     This method will convert new keywords to old keyword that has the same
+     objective.
+
+     :param converter: a dictionary that contains all possible aliases
+        from new keywords to old keywords.
+     :type converter: dict
+
+     :param keywords: list of dictionary keyword
+     :type keywords: list
+
+     .. versionadded:: 2.1
+    """
+    for keyword in keywords:
+        for key, value in keyword.iteritems():
+            try:
+                aliases = converter[key]
+                for alias_key, alias_value in aliases.iteritems():
+                    if value.lower() in alias_value:
+                        keyword[key] = alias_key
+                        break
+            except KeyError:
+                pass

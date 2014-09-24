@@ -24,128 +24,130 @@ import logging
 from urllib2 import URLError
 from zipfile import BadZipfile
 
-from ftp_client import FtpClient
-from sftp_client import SFtpClient
-from utils import setupLogger, dataDir, is_event_id
-from shake_event import ShakeEvent
-# Loading from package __init__ not working in this context so manually doing
-setupLogger()
-LOGGER = logging.getLogger('InaSAFE')
+from realtime.sftp_client import SFtpClient
+from realtime.utilities import data_dir, is_event_id, realtime_logger_name
+from realtime.shake_event import ShakeEvent
+from realtime.exceptions import SFTPEmptyError
+
+# Initialised in realtime.__init__
+LOGGER = logging.getLogger(realtime_logger_name())
 
 
-def processEvent(theEventId=None, theLocale='en'):
+def process_event(event_id=None, locale='en'):
     """Launcher that actually runs the event processing.
-    :param theEventId: The event id to process. If None the latest event will
+
+    :param event_id: The event id to process. If None the latest event will
        be downloaded and processed.
-    :param theLocale:
+    :type event_id: str
+
+    :param locale: The locale that will be used. Default to en.
+    :type locale: str
     """
-    myPopulationPath = os.path.join(
-        dataDir(),
+    population_path = os.path.join(
+        data_dir(),
         'exposure',
-        'IDN_mosaic',
-        'popmap10_all.tif')
+        'population.tif')
 
     # Use cached data where available
     # Whether we should always regenerate the products
-    myForceFlag = False
+    force_flag = False
     if 'INASAFE_FORCE' in os.environ:
-        myForceString = os.environ['INASAFE_FORCE']
-        if str(myForceString).capitalize() == 'Y':
-            myForceFlag = True
+        force_string = os.environ['INASAFE_FORCE']
+        if str(force_string).capitalize() == 'Y':
+            force_flag = True
 
     # We always want to generate en products too so we manipulate the locale
     # list and loop through them:
-    myLocaleList = [theLocale]
-    if 'en' not in myLocaleList:
-        myLocaleList.append('en')
+    locale_list = [locale]
+    if 'en' not in locale_list:
+        locale_list.append('en')
 
     # Now generate the products
-    for myLoc in myLocaleList:
+    for locale in locale_list:
         # Extract the event
         # noinspection PyBroadException
         try:
-            if os.path.exists(myPopulationPath):
-                myShakeEvent = ShakeEvent(
-                    theEventId=theEventId,
-                    theLocale=myLoc,
-                    theForceFlag=myForceFlag,
-                    thePopulationRasterPath=myPopulationPath)
+            if os.path.exists(population_path):
+                shake_event = ShakeEvent(
+                    event_id=event_id,
+                    locale=locale,
+                    force_flag=force_flag,
+                    population_raster_path=population_path)
             else:
-                myShakeEvent = ShakeEvent(
-                    theEventId=theEventId,
-                    theLocale=myLoc,
-                    theForceFlag=myForceFlag)
+                shake_event = ShakeEvent(
+                    event_id=event_id,
+                    locale=locale,
+                    force_flag=force_flag)
         except (BadZipfile, URLError):
             # retry with force flag true
-            if os.path.exists(myPopulationPath):
-                myShakeEvent = ShakeEvent(
-                    theEventId=theEventId,
-                    theLocale=myLoc,
-                    theForceFlag=True,
-                    thePopulationRasterPath=myPopulationPath)
+            if os.path.exists(population_path):
+                shake_event = ShakeEvent(
+                    event_id=event_id,
+                    locale=locale,
+                    force_flag=True,
+                    population_raster_path=population_path)
             else:
-                myShakeEvent = ShakeEvent(
-                    theEventId=theEventId,
-                    theLocale=myLoc,
-                    theForceFlag=True)
+                shake_event = ShakeEvent(
+                    event_id=event_id,
+                    locale=locale,
+                    force_flag=True)
+        except SFTPEmptyError as ex:
+            LOGGER.info(ex)
+            return
         except:
             LOGGER.exception('An error occurred setting up the shake event.')
             return
 
-        LOGGER.info('Event Id: %s', myShakeEvent)
+        LOGGER.info('Event Id: %s', shake_event)
         LOGGER.info('-------------------------------------------')
 
-        myShakeEvent.renderMap(myForceFlag)
+        shake_event.render_map(force_flag)
 
-LOGGER.info('-------------------------------------------')
+if __name__ == '__main__':
+    LOGGER.info('-------------------------------------------')
 
-if 'INASAFE_LOCALE' in os.environ:
-    myLocale = os.environ['INASAFE_LOCALE']
-else:
-    myLocale = 'en'
-
-if len(sys.argv) > 2:
-    sys.exit('Usage:\n%s [optional shakeid]\nor\n%s --list' % (
-        sys.argv[0], sys.argv[0]))
-elif len(sys.argv) == 2:
-    print('Processing shakemap %s' % sys.argv[1])
-
-    myEventId = sys.argv[1]
-    if myEventId in '--list':
-#        myFtpClient = FtpClient()
-        mySftpClient = SFtpClient()
-#        myListing = myFtpClient.getListing()
-        myListing = mySftpClient.getListing(my_func=is_event_id)
-        for myEvent in myListing:
-            print myEvent
-        sys.exit(0)
-    elif myEventId in '--run-all':
-        #
-        # Caution, this code path gets memory leaks, use the
-        # batch file approach rather!
-        #
-        myFtpClient = FtpClient()
-        myListing = myFtpClient.getListing()
-        for myEvent in myListing:
-            if 'out' not in myEvent:
-                continue
-            myEvent = myEvent.replace('ftp://118.97.83.243/', '')
-            myEvent = myEvent.replace('.out.zip', '')
-            print 'Processing %s' % myEvent
-            # noinspection PyBroadException
-            try:
-                processEvent(myEvent, myLocale)
-            except:  # pylint: disable=W0702
-                LOGGER.exception('Failed to process %s' % myEvent)
-        sys.exit(0)
+    if 'INASAFE_LOCALE' in os.environ:
+        locale_option = os.environ['INASAFE_LOCALE']
     else:
-        processEvent(myEventId, myLocale)
+        locale_option = 'en'
 
-else:
-    myEventId = None
-    print('Processing latest shakemap')
-    # noinspection PyBroadException
-    try:
-        processEvent(theLocale=myLocale)
-    except:  # pylint: disable=W0702
-        LOGGER.exception('Process event failed')
+    if len(sys.argv) > 2:
+        sys.exit(
+            'Usage:\n%s [optional shakeid]\nor\n%s --list\nor%s --run-all' % (
+                sys.argv[0], sys.argv[0], sys.argv[0]))
+    elif len(sys.argv) == 2:
+        print('Processing shakemap %s' % sys.argv[1])
+
+        event_option = sys.argv[1]
+        if event_option in '--list':
+            sftp_client = SFtpClient()
+            dir_listing = sftp_client.get_listing(function=is_event_id)
+            for event in dir_listing:
+                print event
+            sys.exit(0)
+        elif event_option in '--run-all':
+            #
+            # Caution, this code path gets memory leaks, use the
+            # batch file approach rather!
+            #
+            sftp_client = SFtpClient()
+            dir_listing = sftp_client.get_listing()
+            for event in dir_listing:
+                print 'Processing %s' % event
+                # noinspection PyBroadException
+                try:
+                    process_event(event, locale_option)
+                except:  # pylint: disable=W0702
+                    LOGGER.exception('Failed to process %s' % event)
+            sys.exit(0)
+        else:
+            process_event(event_option, locale_option)
+
+    else:
+        event_option = None
+        print('Processing latest shakemap')
+        # noinspection PyBroadException
+        try:
+            process_event(locale=locale_option)
+        except:  # pylint: disable=W0702
+            LOGGER.exception('Process event failed')

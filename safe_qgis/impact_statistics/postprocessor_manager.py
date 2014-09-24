@@ -20,10 +20,9 @@ import logging
 
 from PyQt4 import QtCore
 
-from qgis.core import (
-    QgsFeatureRequest)
+from qgis.core import QgsFeatureRequest
 
-from third_party.odict import OrderedDict
+from collections import OrderedDict
 
 from safe.common.utilities import unhumanize_number, format_int
 
@@ -32,8 +31,10 @@ from safe_qgis.safe_interface import (
     safeTr,
     get_postprocessors,
     get_postprocessor_human_name,
-    messaging as m)
-from safe_qgis.exceptions import KeywordNotFoundError
+    messaging as m,
+    PostProcessorError,
+    KeywordNotFoundError,
+    styles)
 
 LOGGER = logging.getLogger('InaSAFE')
 #from pydev import pydevd
@@ -61,9 +62,10 @@ class PostprocessorManager(QtCore.QObject):
         self.aggregator = aggregator
         self.current_output_postprocessor = None
         self.attribute_title = None
+        self.function_parameters = None
 
     def _sum_field_name(self):
-        return self.aggregator.prefix + 'sum'
+        return self.aggregator.sum_field_name()
 
     def _sort_no_data(self, data):
         """Check if the value field of the postprocessor is NO_DATA.
@@ -80,11 +82,12 @@ class PostprocessorManager(QtCore.QObject):
 
         post_processor = self.output[self.current_output_postprocessor]
         #get the key position of the value field
-        key = post_processor[0][1].keyAt(0)
+        key = post_processor[0][1].keys()[0]
         #get the value
         # data[1] is the orderedDict
         # data[1][myFirstKey] is the 1st indicator in the orderedDict
-        if data[1][key]['value'] == self.aggregator.defaults['NO_DATA']:
+        if (data[1][key]['value'] == self.aggregator.get_default_keyword(
+                'NO_DATA')):
             position = -1
         else:
             position = data[1][key]['value']
@@ -148,7 +151,7 @@ class PostprocessorManager(QtCore.QObject):
                 for indicator, calculation_data in calc.iteritems():
                     value = calculation_data['value']
                     value = str(unhumanize_number(value))
-                    if value == self.aggregator.defaults['NO_DATA']:
+                    if value == self.aggregator.get_default_keyword('NO_DATA'):
                         has_no_data = True
                         value += ' *'
                         try:
@@ -177,7 +180,8 @@ class PostprocessorManager(QtCore.QObject):
                 message.add(m.EmphasizedText(self.tr(
                     '* "%s" values mean that there where some problems while '
                     'calculating them. This did not affect the other '
-                    'values.') % (self.aggregator.defaults['NO_DATA'])))
+                    'values.') % (
+                        self.aggregator.get_default_keyword('NO_DATA'))))
 
         return message
 
@@ -211,7 +215,8 @@ class PostprocessorManager(QtCore.QObject):
                         # see http://irclogs.geoapt.com/inasafe/
                         # %23inasafe.2013-08-09.log (at 22.29)
 
-                        no_data = self.aggregator.defaults['NO_DATA']
+                        no_data = \
+                            self.aggregator.get_default_keyword('NO_DATA')
                         # both are No data
                         value = first_part_result['value']
                         result_value = result['value']
@@ -249,8 +254,10 @@ class PostprocessorManager(QtCore.QObject):
         """Run any post processors requested by the impact function.
         """
         try:
-            requested_postprocessors = self.functionParams['postprocessors']
-            postprocessors = get_postprocessors(requested_postprocessors)
+            requested_postprocessors = self.function_parameters[
+                'postprocessors']
+            postprocessors = get_postprocessors(
+                requested_postprocessors, self.aggregator.aoi_mode)
         except (TypeError, KeyError):
             # TypeError is for when function_parameters is none
             # KeyError is for when ['postprocessors'] is unavailable
@@ -258,7 +265,7 @@ class PostprocessorManager(QtCore.QObject):
         LOGGER.debug('Running this postprocessors: ' + str(postprocessors))
 
         feature_names_attribute = self.aggregator.attributes[
-            self.aggregator.defaults['AGGR_ATTR_KEY']]
+            self.aggregator.get_default_keyword('AGGR_ATTR_KEY')]
         if feature_names_attribute is None:
             self.attribute_title = self.tr('Aggregation unit')
         else:
@@ -272,14 +279,22 @@ class PostprocessorManager(QtCore.QObject):
         user_defined_female_ratio = False
         female_ratio_field_index = None
         female_ratio = None
+        user_defined_age_ratios = False
+        youth_ratio_field_index = None
+        youth_ratio = None
+        adult_ratio_field_index = None
+        adult_ratio = None
+        elderly_ratio_field_index = None
+        elderly_ratio = None
 
         if 'Gender' in postprocessors:
             # look if we need to look for a variable female ratio in a layer
             try:
-                female_ration_field = self.aggregator.attributes[
-                    self.aggregator.defaults['FEM_RATIO_ATTR_KEY']]
+                female_ratio_field = self.aggregator.attributes[
+                    self.aggregator.get_default_keyword(
+                        'FEMALE_RATIO_ATTR_KEY')]
                 female_ratio_field_index = \
-                    self.aggregator.layer.fieldNameIndex(female_ration_field)
+                    self.aggregator.layer.fieldNameIndex(female_ratio_field)
 
                 # something went wrong finding the female ratio field,
                 # use defaults from below except block
@@ -292,9 +307,69 @@ class PostprocessorManager(QtCore.QObject):
                 try:
                     female_ratio = self.keyword_io.read_keywords(
                         self.aggregator.layer,
-                        self.aggregator.defaults['FEM_RATIO_KEY'])
+                        self.aggregator.get_default_keyword(
+                            'FEMALE_RATIO_KEY'))
                 except KeywordNotFoundError:
-                    female_ratio = self.aggregator.defaults['FEM_RATIO']
+                    female_ratio = \
+                        self.aggregator.get_default_keyword('FEMALE_RATIO')
+
+        if 'Age' in postprocessors:
+            # look if we need to look for a variable age ratio in a layer
+            try:
+                youth_ratio_field = self.aggregator.attributes[
+                    self.aggregator.get_default_keyword(
+                        'YOUTH_RATIO_ATTR_KEY')]
+                youth_ratio_field_index = \
+                    self.aggregator.layer.fieldNameIndex(youth_ratio_field)
+                adult_ratio_field = self.aggregator.attributes[
+                    self.aggregator.get_default_keyword(
+                        'ADULT_RATIO_ATTR_KEY')]
+                adult_ratio_field_index = \
+                    self.aggregator.layer.fieldNameIndex(adult_ratio_field)
+                elderly_ratio_field = self.aggregator.attributes[
+                    self.aggregator.get_default_keyword(
+                        'ELDERLY_RATIO_ATTR_KEY')]
+                elderly_ratio_field_index = \
+                    self.aggregator.layer.fieldNameIndex(elderly_ratio_field)
+                # something went wrong finding the youth ratio field,
+                # use defaults from below except block
+                if (youth_ratio_field_index == -1 or
+                            adult_ratio_field_index == -1 or
+                            elderly_ratio_field_index == -1):
+                    raise KeyError
+
+                user_defined_age_ratios = True
+
+            except KeyError:
+                try:
+                    youth_ratio = self.keyword_io.read_keywords(
+                        self.aggregator.layer,
+                        self.aggregator.get_default_keyword(
+                            'YOUTH_RATIO_KEY'))
+                    adult_ratio = self.keyword_io.read_keywords(
+                        self.aggregator.layer,
+                        self.aggregator.get_default_keyword(
+                            'ADULT_RATIO_KEY'))
+                    elderly_ratio = self.keyword_io.read_keywords(
+                        self.aggregator.layer,
+                        self.aggregator.get_default_keyword(
+                            'ELDERLY_RATIO_KEY'))
+
+                except KeywordNotFoundError:
+                    youth_ratio = \
+                        self.aggregator.get_default_keyword('YOUTH_RATIO')
+                    adult_ratio = \
+                        self.aggregator.get_default_keyword('ADULT_RATIO')
+                    elderly_ratio = \
+                        self.aggregator.get_default_keyword('ELDERLY_RATIO')
+
+        if 'BuildingType' or 'RoadType' in postprocessors:
+            try:
+                key_attribute = self.keyword_io.read_keywords(
+                    self.aggregator.exposure_layer, 'key_attribute')
+            except KeywordNotFoundError:
+                #use 'type' as default
+                key_attribute = 'type'
 
         # iterate zone features
         request = QgsFeatureRequest()
@@ -313,7 +388,7 @@ class PostprocessorManager(QtCore.QObject):
             # create dictionary of attributes to pass to postprocessor
             general_params = {
                 'target_field': self.aggregator.target_field,
-                'function_params': self.functionParams}
+                'function_params': self.function_parameters}
 
             if self.aggregator.statistics_type == 'class_count':
                 general_params['impact_classes'] = (
@@ -334,7 +409,8 @@ class PostprocessorManager(QtCore.QObject):
                 try:
                     # look if params are available for this postprocessor
                     parameters.update(
-                        self.functionParams['postprocessors'][key]['params'])
+                        self.function_parameters[
+                            'postprocessors'][key]['params'])
                 except KeyError:
                     pass
 
@@ -343,18 +419,58 @@ class PostprocessorManager(QtCore.QObject):
                         female_ratio = feature[female_ratio_field_index]
                         if female_ratio is None:
                             female_ratio = self.aggregator.defaults[
-                                'FEM_RATIO']
-                        LOGGER.debug(female_ratio)
+                                'FEMALE_RATIO']
+                            LOGGER.warning('Data Driven Female ratio '
+                                           'incomplete, using defaults for'
+                                           ' aggregation unit'
+                                           ' %s' % feature.id)
+
                     parameters['female_ratio'] = female_ratio
 
-                value.setup(parameters)
-                value.process()
-                results = value.results()
-                value.clear()
-#                LOGGER.debug(results)
+                if key == 'Age':
+                    if user_defined_age_ratios:
+                        youth_ratio = feature[youth_ratio_field_index]
+                        adult_ratio = feature[adult_ratio_field_index]
+                        elderly_ratio = feature[elderly_ratio_field_index]
+                        if (youth_ratio is None or
+                                    adult_ratio is None or
+                                    elderly_ratio is None):
+                            youth_ratio = self.aggregator.defaults[
+                                'YOUTH_RATIO']
+                            adult_ratio = self.aggregator.defaults[
+                                'ADULT_RATIO']
+                            elderly_ratio = self.aggregator.defaults[
+                                'ELDERLY_RATIO']
+                            LOGGER.warning('Data Driven Age ratios '
+                                           'incomplete, using defaults for'
+                                           ' aggregation unit'
+                                           ' %s' % feature.id)
+
+                    parameters['youth_ratio'] = youth_ratio
+                    parameters['adult_ratio'] = adult_ratio
+                    parameters['elderly_ratio'] = elderly_ratio
+
+                if key == 'BuildingType' or key == 'RoadType':
+                    parameters['key_attribute'] = key_attribute
+
                 try:
+                    value.setup(parameters)
+                    value.process()
+                    results = value.results()
+                    value.clear()
+    #                LOGGER.debug(results)
+
+                    #this can raise a KeyError
                     self.output[key].append(
                         (zone_name, results))
+
+                except PostProcessorError as e:
+                    message = m.Message(
+                        m.Heading(self.tr('%s postprocessor problem' % key),
+                                  **styles.DETAILS_STYLE),
+                        m.Paragraph(self.tr(str(e))))
+                    self.error_message = message
+
                 except KeyError:
                     self.output[key] = []
                     self.output[key].append(
@@ -370,20 +486,25 @@ class PostprocessorManager(QtCore.QObject):
 
         :returns: str - a string containing the html in the requested format.
         """
-        if self.error_message is not None:
-            message = m.Message(
-                m.Heading(self.tr('Postprocessing report skipped')),
-                m.Paragraph(self.tr(
-                    'Due to a problem while processing the results,'
-                    ' the detailed postprocessing report is unavailable:'
-                    ' %s') % self.error_message))
-            return message
-        else:
-            try:
-                if (self.keyword_io.read_keywords(
-                        self.aggregator.layer, 'had multipart polygon')):
-                    self._consolidate_multipart_stats()
-            except KeywordNotFoundError:
-                pass
 
-            return self._generate_tables(aoi_mode)
+        message = m.Message()
+        if self.error_message is not None:
+            message.add(
+                m.Heading(
+                    self.tr('Postprocessing report partially skipped'),
+                    **styles.WARNING_STYLE))
+            message.add(
+                m.Paragraph(self.tr(
+                    'Due to a problem while processing the results, part of '
+                    'the detailed postprocessing report is unavailable:')))
+            message.add(self.error_message)
+
+        try:
+            if (self.keyword_io.read_keywords(
+                    self.aggregator.layer, 'had multipart polygon')):
+                self._consolidate_multipart_stats()
+        except KeywordNotFoundError:
+            pass
+
+        message.add(self._generate_tables(aoi_mode))
+        return message

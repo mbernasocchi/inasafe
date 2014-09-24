@@ -1,26 +1,31 @@
+# coding=utf-8
 import unittest
 import logging
 import os
 
-from core import FunctionProvider
-from core import requirements_collect
-from core import requirement_check
-from core import requirements_met
-from core import get_admissible_plugins
-from core import get_function_title
-from core import get_plugins_as_table
-from core import parse_single_requirement
-from core import get_metadata
-from core import evacuated_population_weekly_needs
-from utilities import pretty_string
+from safe.impact_functions.core import (
+    FunctionProvider,
+    requirements_collect,
+    requirement_check,
+    requirements_met,
+    get_admissible_plugins,
+    get_function_title,
+    get_plugins_as_table,
+    parse_single_requirement,
+    get_metadata,
+    evacuated_population_weekly_needs,
+    aggregate,
+    convert_to_old_keywords
+)
+from safe.impact_functions.utilities import pretty_string
 from safe.common.utilities import format_int
-# from safe.impact_functions.core import get_dict_doc_func
+from safe.metadata import converter_dict
 
 LOGGER = logging.getLogger('InaSAFE')
 
 
 # noinspection PyUnresolvedReferences
-class BasicFunction(FunctionProvider):
+class BasicFunctionCore(FunctionProvider):
     """Risk plugin for testing
 
     :author Allen
@@ -125,7 +130,7 @@ class Test_plugin_core(unittest.TestCase):
     def test_basic_plugin_requirements(self):
         """Basic plugin requirements collection
         """
-        requirelines = requirements_collect(BasicFunction)
+        requirelines = requirements_collect(BasicFunctionCore)
         params = {'category': 'test_cat1', 'unit': 'MMI'}
         assert requirements_met(requirelines, params)
 
@@ -135,7 +140,7 @@ class Test_plugin_core(unittest.TestCase):
     def test_basic_plugin_requirements_met(self):
         """Basic plugin requirements met
         """
-        requirelines = requirements_collect(BasicFunction)
+        requirelines = requirements_collect(BasicFunctionCore)
         valid_return = ['category=="test_cat1"', 'unit=="MMI"']
         for ret1, ret2 in zip(valid_return, requirelines):
             assert ret1 == ret2, "Error in requirements extraction"
@@ -143,7 +148,7 @@ class Test_plugin_core(unittest.TestCase):
     def test_basic_requirements_check(self):
         """Basic plugin requirements check
         """
-        requirelines = requirements_collect(BasicFunction)
+        requirelines = requirements_collect(BasicFunctionCore)
         params = {'category': 'test_cat2'}
         for line in requirelines:
             check = requirement_check(params, line)
@@ -279,7 +284,7 @@ class Test_plugin_core(unittest.TestCase):
         # won't make a difference to the result
         result = evacuated_population_weekly_needs(20)
         assert (result['rice'] == 56 and result['drinking_water'] == 350
-                and result['water'] == 2100 and result['family_kits'] == 4
+                and result['water'] == 1340 and result['family_kits'] == 4
                 and result['toilets'] == 1)
 
     def test_arbitrary_weekly_needs(self):
@@ -292,6 +297,46 @@ class Test_plugin_core(unittest.TestCase):
         assert (result['rice'] == 40 and result['drinking_water'] == 30
                 and result['water'] == 20 and result['family_kits'] == 10
                 and result['toilets'] == 2)
+
+    def test_aggregate(self):
+        """Test aggregate function behaves as expected."""
+        class MockRasterData(object):
+            """Fake raster data object."""
+            def __init__(self):
+                self.is_point_data = False
+                self.is_raster_data = True
+
+        class MockOtherData(object):
+            """Fake other data object."""
+            def __init__(self):
+                self.is_point_data = False
+                self.is_raster_data = False
+
+        # Test raster data
+        raster_data = MockRasterData()
+        result = aggregate(raster_data)
+        self.assertIsNone(result)
+
+        # Test Not Point Data nor raster Data:
+        other_data = MockOtherData()
+        self.assertRaises(Exception, aggregate, other_data)
+
+    def test_convert_to_old_keywords(self):
+        """Test to convert new keywords to old keywords system."""
+        new_keywords = {
+            'category': 'hazard',
+            'subcategory': 'tsunami',
+            'unit': 'metres_depth'
+        }
+
+        convert_to_old_keywords(converter_dict, [new_keywords])
+        expected_keywords = {
+            'category': 'hazard',
+            'subcategory': 'tsunami',
+            'unit': 'm'
+        }
+        msg = 'Expected %s but I got %s' % (expected_keywords, new_keywords)
+        self.assertDictEqual(new_keywords, expected_keywords, msg)
 
 
 if __name__ == '__main__':

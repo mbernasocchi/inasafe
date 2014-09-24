@@ -23,9 +23,11 @@ __copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
 
 # pylint: disable=W0611
 #noinspection PyUnresolvedReferences
-from safe.defaults import DEFAULTS
+from safe.impact_functions.impact_function_manager import ImpactFunctionManager
+from safe.storage.vector import Layer
 from safe.storage.vector import Vector
 from safe.storage.raster import Raster
+from safe.defaults import DEFAULTS
 from safe.storage.utilities import (
     bbox_intersection,
     buffered_bounding_box,
@@ -59,7 +61,8 @@ from safe.common.exceptions import (
     InaSAFEError,
     GetDataError,
     ZeroImpactException,
-    PointsInputError)
+    PointsInputError,
+    PostProcessorError)
 from safe.common.utilities import (
     VerificationError,
     temp_dir,
@@ -68,11 +71,16 @@ from safe.common.utilities import (
     get_free_memory,
     format_int,
     get_thousand_separator,
-    get_decimal_separator)
-from safe.common.converter import convert_mmi_data
+    get_decimal_separator,
+    get_utm_epsg,
+    feature_attributes_as_dict,
+    which,
+    log_file_path,
+    romanise)
 from safe.common.version import get_version
 from safe.common.polygon import in_and_outside_polygon
 from safe.common.tables import Table, TableCell, TableRow
+from safe.common.custom_logging import add_logging_handler_once, setup_logger
 from safe.postprocessors import (
     get_postprocessors,
     get_postprocessor_human_name)
@@ -83,8 +91,9 @@ from safe.common.signals import (
     STATIC_MESSAGE_SIGNAL,
     ERROR_MESSAGE_SIGNAL)
 from safe.messaging import ErrorMessage
+from safe import metadata
 
-# hack for excluding test-related import in builded package
+# hack for excluding test-related import in built package
 try:
     from safe.common.testing import (
         HAZDATA, EXPDATA, TESTDATA, UNITDATA, BOUNDDATA)
