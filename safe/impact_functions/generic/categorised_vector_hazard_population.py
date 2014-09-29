@@ -1,17 +1,31 @@
+"""
+InaSAFE Disaster risk assessment tool developed by AusAid - **Message Modele.**
+
+Contact : ole.moller.nielsen@gmail.com
+
+.. note:: This program is free software; you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+     the Free Software Foundation; either version 2 of the License, or
+     (at your option) any later version.
+"""
+
+__author__ = 'marco@opengis.ch'
+__revision__ = '$Format:%H$'
+__date__ = '29/05/2013'
+__copyright__ = ('Copyright 2012, Australia Indonesia Facility for '
+                 'Disaster Reduction')
+
+from safe.common.utilities import ugettext as tr
 from safe.defaults import get_defaults
 from safe import messaging as m
 from safe.impact_functions.core import (FunctionProvider,
                                         get_hazard_layer,
                                         get_exposure_layer,
-                                        get_question,
-                                        get_function_title)
+                                        get_question)
 from safe.impact_functions.styles import categorical_style
 from safe.storage.vector import convert_polygons_to_centroids
 from safe.common.polygon import is_inside_polygon
-from safe.common.utilities import (ugettext as tr,
-                                   format_int,
-                                   round_thousand)
-from third_party.odict import OrderedDict
+from collections import OrderedDict
 
 
 class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
@@ -29,17 +43,17 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     """
     # Function documentation
 
-    NO_DATA = 0  # TODO (MB) this should come from defaults('NO_DATA') but
+    NO_DATA = -9999  # TODO (MB) this should come from defaults('NO_DATA') but
     # needs a bit more work
+    NO_DATA_LABEL = tr('No Data')
 
     title = tr('Be vectoring impacted')
     synopsis = tr('To assess the impacts of categorized hazards in vector '
                   'format on population vector layer.')
     actions = tr('Provide details about how many people would likely need '
                  'to be impacted for each category.')
-    hazard_input = tr('A hazard vector layer where each cell represents '
-                      'the category of the hazard. There should be 3 '
-                      'categories: 1, 2, and 3.')
+    hazard_input = tr('A hazard vector layer where each polygon represents '
+                      'the category of the hazard.')
     exposure_input = tr('An exposure vector layer where each cell represent '
                         'population count.')
     output = tr('Map of population exposed to high category and a table with '
@@ -58,8 +72,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         ('exposure id field', 'id'),
         ('exposure field', 'pop'),
         ('hazard field', 'haz_level'),
-        ('categories', [NO_DATA, 1, 2, 3]),  # TODO (DB) allow
-        # strings as cat
+        ('categories', [0, 1, 2, 3]),  # TODO (DB) allow strings as cat
+        ('categories_labels', ['No hazard', 'Low', 'Medium', 'High']),
         ('postprocessors', OrderedDict([
             ('Gender', {'on': False}),
             ('Age', {
@@ -68,6 +82,9 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                     ('youth_ratio', defaults['YOUTH_RATIO']),
                     ('adult_ratio', defaults['ADULT_RATIO']),
                     ('elderly_ratio', defaults['ELDERLY_RATIO'])])})]))])
+
+    parameters['categories'].insert(0, NO_DATA)
+    parameters['categories_labels'].insert(0, NO_DATA_LABEL)
 
     def run(self, layers):
         """Plugin for impact of population as derived by categorised hazard
@@ -104,10 +121,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         my_impact.style_info = categorical_style(
             self.parameters['hazard field'],
             self.parameters['categories'],
-            self.NO_DATA,
-            tr('No hazard'),
-            self.parameters['exposure field'],
-            max_impact_value)
+            self.parameters['categories_labels'],
+            self.parameters['exposure field'], max_impact_value)
 
         my_impact_keywords = {
             'impact_summary': my_impact_summary,
@@ -196,7 +211,6 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
         impact_level_field = self.parameters['hazard field']
         impact_count_field = self.parameters['exposure field']
         for attr in impact_attr:
-            # FIXME (DB): Change id to user configurable
             current_id = attr[self.parameters['exposure id field']]
             impact_level = attr[impact_level_field]
             try:
@@ -210,11 +224,8 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
     def generate_report(self, question, stats):
         th = m.Row(m.Cell(m.ImportantText(
             self.parameters['exposure id field'])))
-        for category in self.parameters['categories']:
-            if category == self.NO_DATA:
-                text = tr('No Hazard')
-            else:
-                text = '%s %s' % (tr('Category'), category)
+        for category in self.parameters['categories_labels']:
+            text = str(category)
             th.add(m.Cell(m.ImportantText(text)))
         table = m.Table(th)
         for name, categories in stats.iteritems():
@@ -223,7 +234,7 @@ class CategorisedVectorHazardPopulationImpactFunction(FunctionProvider):
                 row.add(str(value))
             table.add(row)
 
-        map_title = tr('Impacted People by Category')
+        map_title = tr('Impacted People by category')
         report = m.Message(m.Heading(map_title, 5), table)
         report = report.to_html(suppress_newlines=True)
         impact_summary = report

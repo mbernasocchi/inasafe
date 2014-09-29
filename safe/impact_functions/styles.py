@@ -85,22 +85,16 @@ earthquake_fatality_style = dict(target_field=None,
 
 def categorical_style(target_field,
                       categories,
-                      no_data_value,
-                      no_data_label,
+                      categories_labels,
                       data_defined_saturation_field=None,
                       max_impact_value=None):
     """Style with equidistant hue and optional data defined saturation
+    :param categories_labels:
     :param target_field: field name that needs to be classified
     :type: target_field, str
 
     :param categories: values of target_field
     :type: categories, list
-
-    :param no_data_value: value for no data
-    :type: no_data_value, int, str
-
-    :param no_data_label: label for the no data category
-    :type: no_data_label, str
 
     :param data_defined_saturation_field: field for saturation for the
         generated colors.
@@ -119,10 +113,7 @@ def categorical_style(target_field,
 
     for index, category in enumerate(categories):
         hsv = colors['hsv'][index]
-        if category == no_data_value:
-            label = no_data_label
-        else:
-            label = '%s %s' % (tr('Category'), category)
+        label = str(categories_labels[index])
         style_class = dict(
             label=label,
             value=category,
