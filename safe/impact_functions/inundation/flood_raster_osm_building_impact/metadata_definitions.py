@@ -18,7 +18,7 @@ from safe.defaults import building_type_postprocessor
 from safe.impact_functions.impact_function_metadata import \
     ImpactFunctionMetadata
 from safe.impact_functions.inundation.flood_raster_osm_building_impact\
-    .parameter_definitions import threshold
+    .parameter_definitions import threshold, thresholds
 from safe.utilities.i18n import tr
 from safe.definitions import (
     layer_mode_classified,
@@ -125,6 +125,7 @@ class FloodRasterBuildingMetadata(ImpactFunctionMetadata):
             },
             'parameters': OrderedDict([
                 ('threshold', threshold()),
+                ('thresholds', thresholds()),
                 ('postprocessors', OrderedDict([
                     ('BuildingType', building_type_postprocessor())
                 ]))
