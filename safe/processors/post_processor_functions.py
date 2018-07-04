@@ -3,6 +3,7 @@
 """Python functions that we use in postprocessors."""
 
 from math import floor
+from scipy.stats import norm
 
 from scipy.stats import norm
 
